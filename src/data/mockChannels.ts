@@ -1,0 +1,552 @@
+import { Category, Channel, SubscriptionPlan, AdSlot, SystemSettings, PaymentSettings, UserSubscriber } from '../types';
+
+export const INITIAL_CATEGORIES: Category[] = [
+  { id: 'cat_all', name: 'Todos os Canais', slug: 'todos', order: 0, iconName: 'Layers' },
+  { id: 'cat_aberta', name: 'TV Aberta', slug: 'tv-aberta', order: 1, iconName: 'Tv' },
+  { id: 'cat_esportes', name: 'Esportes', slug: 'esportes', order: 2, iconName: 'Trophy' },
+  { id: 'cat_filmes', name: 'Filmes e Séries', slug: 'filmes-series', order: 3, iconName: 'Film' },
+  { id: 'cat_noticias', name: 'Notícias', slug: 'noticias', order: 4, iconName: 'Newspaper' },
+  { id: 'cat_infantil', name: 'Infantil', slug: 'infantil', order: 5, iconName: 'Smile' },
+  { id: 'cat_documentarios', name: 'Documentários', slug: 'documentarios', order: 6, iconName: 'Compass' },
+  { id: 'cat_variedades', name: 'Variedades', slug: 'variedades', order: 7, iconName: 'Sparkles' },
+];
+
+export const INITIAL_CHANNELS: Channel[] = [
+  // TV Aberta (Demo)
+  {
+    id: 'ch_globo',
+    number: 1,
+    name: 'Rede Globo (Demo)',
+    categoryId: 'cat_aberta',
+    categoryName: 'TV Aberta',
+    logo: 'https://images.unsplash.com/photo-1598899134739-24c46f58b8c0?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    alternativeStreams: ['https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4'],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Jornal Nacional (Demonstração)',
+    currentProgramTime: '20:30 - 21:30',
+    nextProgram: 'Programação Noturna',
+    isLive: false,
+    isLocked: false,
+    featured: true,
+    description: 'Sinal aberto demonstrativo para testes e homologação visual da plataforma Gato Net.'
+  },
+  {
+    id: 'ch_sbt',
+    number: 2,
+    name: 'SBT (Demo)',
+    categoryId: 'cat_aberta',
+    categoryName: 'TV Aberta',
+    logo: 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Programa de Auditório (Demonstração)',
+    currentProgramTime: '20:00 - 22:00',
+    nextProgram: 'Jornalismo Noturno',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal de teste demonstrativo com conteúdo de variedades e entretenimento.'
+  },
+  {
+    id: 'ch_record',
+    number: 3,
+    name: 'Record TV (Demo)',
+    categoryId: 'cat_aberta',
+    categoryName: 'TV Aberta',
+    logo: 'https://images.unsplash.com/photo-1522869635100-9f4c5e86aa37?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Jornal Noturno (Demonstração)',
+    currentProgramTime: '19:50 - 21:00',
+    nextProgram: 'Série Noturna',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal demonstrativo para testes de fluxo e interface da Gato Net.'
+  },
+  {
+    id: 'ch_band',
+    number: 4,
+    name: 'Band TV (Demo)',
+    categoryId: 'cat_aberta',
+    categoryName: 'TV Aberta',
+    logo: 'https://images.unsplash.com/photo-1518173946687-a4c8892bbd9f?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Jornal Esportivo (Demonstração)',
+    currentProgramTime: '19:20 - 20:30',
+    nextProgram: 'Programa Culinário',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal de demonstração para validação de navegação e layout.'
+  },
+  {
+    id: 'ch_cultura',
+    number: 5,
+    name: 'TV Cultura (Demo)',
+    categoryId: 'cat_aberta',
+    categoryName: 'TV Aberta',
+    logo: 'https://images.unsplash.com/photo-1505373877841-8d25f7d46678?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Debates & Entrevistas (Demonstração)',
+    currentProgramTime: '22:00 - 23:30',
+    nextProgram: 'Programa Cultural',
+    isLive: false,
+    isLocked: false,
+    description: 'Conteúdo cultural em canal demonstrativo para testes de usabilidade.'
+  },
+
+  // Esportes (Demo)
+  {
+    id: 'ch_gato_esportes_1',
+    number: 10,
+    name: 'Gato Esporte 1 (Demo)',
+    categoryId: 'cat_esportes',
+    categoryName: 'Esportes',
+    logo: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/tv_sports_broadcast_1792172574447.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Futebol Pré-Jogo (Demonstração)',
+    currentProgramTime: '21:00 - 23:00',
+    nextProgram: 'Mesa Redonda Esportiva',
+    isLive: false,
+    isLocked: false,
+    featured: true,
+    description: 'Canal demonstrativo temático de futebol para teste de reprodutor de vídeo.'
+  },
+  {
+    id: 'ch_arena_play',
+    number: 11,
+    name: 'Arena Play Esportes (Demo)',
+    categoryId: 'cat_esportes',
+    categoryName: 'Esportes',
+    logo: 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/tv_sports_broadcast_1792172574447.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Melhores Momentos (Demonstração)',
+    currentProgramTime: '20:15 - 21:45',
+    nextProgram: 'Basquete Noturno',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal de teste com compilações esportivas demonstrativas.'
+  },
+  {
+    id: 'ch_velocidade',
+    number: 12,
+    name: 'Velocidade & Motores (Demo)',
+    categoryId: 'cat_esportes',
+    categoryName: 'Esportes',
+    logo: 'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/tv_sports_broadcast_1792172574447.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Treinos Livres (Demonstração)',
+    currentProgramTime: '18:00 - 19:30',
+    nextProgram: 'Superbikes Resumo',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal demonstrativo voltado a testes com automobilismo e motociclismo.'
+  },
+
+  // Filmes e Séries (Demo)
+  {
+    id: 'ch_cine_prime',
+    number: 20,
+    name: 'Cine Prime Brasil (Demo)',
+    categoryId: 'cat_filmes',
+    categoryName: 'Filmes e Séries',
+    logo: 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/tv_cinema_backdrop_1792172575834.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Filme Demonstrativo: Tears of Steel',
+    currentProgramTime: '21:15 - 23:45',
+    nextProgram: 'Sessão Cinema Retrô',
+    isLive: false,
+    isLocked: false,
+    featured: true,
+    description: 'Canal de cinema demonstrativo utilizando material de teste de domínio público.'
+  },
+  {
+    id: 'ch_acao_total',
+    number: 21,
+    name: 'Ação Total TV (Demo)',
+    categoryId: 'cat_filmes',
+    categoryName: 'Filmes e Séries',
+    logo: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/tv_cinema_backdrop_1792172575834.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Filme de Ação (Demonstração)',
+    currentProgramTime: '20:00 - 22:00',
+    nextProgram: 'Maratona Noturna',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal de filmes demonstrativo para testes do reprodutor.'
+  },
+  {
+    id: 'ch_series_nostalgia',
+    number: 22,
+    name: 'Séries & Nostalgia (Demo)',
+    categoryId: 'cat_filmes',
+    categoryName: 'Filmes e Séries',
+    logo: 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/tv_cinema_backdrop_1792172575834.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Série Clássica (Demonstração)',
+    currentProgramTime: '20:45 - 21:40',
+    nextProgram: 'Arquivo Clássico',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal demonstrativo para validação da proporção de tela e controles.'
+  },
+
+  // Notícias (Demo)
+  {
+    id: 'ch_gato_news_24h',
+    number: 30,
+    name: 'Gato Notícias 24h (Demo)',
+    categoryId: 'cat_noticias',
+    categoryName: 'Notícias',
+    logo: 'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/tv_news_studio_1792172576166.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Plantão Jornalístico (Demonstração)',
+    currentProgramTime: '21:00 - 22:00',
+    nextProgram: 'Painel Noticioso',
+    isLive: false,
+    isLocked: false,
+    featured: true,
+    description: 'Canal de jornalismo demonstrativo para homologação de layout e EPG.'
+  },
+  {
+    id: 'ch_radar_global',
+    number: 31,
+    name: 'Radar Global Notícias (Demo)',
+    categoryId: 'cat_noticias',
+    categoryName: 'Notícias',
+    logo: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/tv_news_studio_1792172576166.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Panorama Internacional (Demonstração)',
+    currentProgramTime: '20:30 - 21:30',
+    nextProgram: 'Debate de Economia',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal de teste para testes de estabilidade do reprodutor.'
+  },
+
+  // Infantil (Demo)
+  {
+    id: 'ch_gatinho_toon',
+    number: 40,
+    name: 'Gatinho Toon (Demo)',
+    categoryId: 'cat_infantil',
+    categoryName: 'Infantil',
+    logo: 'https://images.unsplash.com/photo-1563089145-599997674d42?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Animação: Big Buck Bunny (Teste)',
+    currentProgramTime: '19:30 - 20:30',
+    nextProgram: 'Desenhos Clássicos',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal infantil demonstrativo utilizando animação aberta para teste.'
+  },
+  {
+    id: 'ch_kids_brasil',
+    number: 41,
+    name: 'Mundo Criança Brasil (Demo)',
+    categoryId: 'cat_infantil',
+    categoryName: 'Infantil',
+    logo: 'https://images.unsplash.com/photo-1513542789411-b6a5d4f31634?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Histórias Infantis (Demonstração)',
+    currentProgramTime: '20:00 - 21:00',
+    nextProgram: 'Contos Educativos',
+    isLive: false,
+    isLocked: false,
+    description: 'Conteúdo lúdico demonstrativo para validação da interface em Smart TVs.'
+  },
+
+  // Documentários (Demo)
+  {
+    id: 'ch_planeta_terra',
+    number: 50,
+    name: 'Planeta Terra Selvagem (Demo)',
+    categoryId: 'cat_documentarios',
+    categoryName: 'Documentários',
+    logo: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Natureza & Planeta (Demonstração)',
+    currentProgramTime: '21:00 - 22:30',
+    nextProgram: 'Vida Selvagem',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal demonstrativo com imagens de natureza para teste de qualidade de vídeo.'
+  },
+  {
+    id: 'ch_historia_viva',
+    number: 51,
+    name: 'História & Civilizações (Demo)',
+    categoryId: 'cat_documentarios',
+    categoryName: 'Documentários',
+    logo: 'https://images.unsplash.com/photo-1461360370896-922624d12aa1?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Grandes Civilizações (Demonstração)',
+    currentProgramTime: '20:15 - 21:45',
+    nextProgram: 'Arqueologia Mundial',
+    isLive: false,
+    isLocked: false,
+    description: 'Documentários históricos em canal demonstrativo.'
+  },
+
+  // Variedades (Demo)
+  {
+    id: 'ch_sabores_brasil',
+    number: 60,
+    name: 'Sabores & Gastronomia (Demo)',
+    categoryId: 'cat_variedades',
+    categoryName: 'Variedades',
+    logo: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Culinária em Foco (Demonstração)',
+    currentProgramTime: '20:30 - 21:30',
+    nextProgram: 'Viagem Gastronômica',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal demonstrativo para homologação da grade de variedades.'
+  },
+  {
+    id: 'ch_som_ao_vivo',
+    number: 61,
+    name: 'Som Brasil Ao Vivo (Demo)',
+    categoryId: 'cat_variedades',
+    categoryName: 'Variedades',
+    logo: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=160&q=80',
+    backupImage: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
+    streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+    alternativeStreams: [],
+    resolution: '1080p',
+    aspectRatio: '16:9',
+    currentProgram: 'Música & Acústico (Demonstração)',
+    currentProgramTime: '21:00 - 23:00',
+    nextProgram: 'Sessão Musical Noturna',
+    isLive: false,
+    isLocked: false,
+    description: 'Canal demonstrativo de música para validação de áudio e vídeo.'
+  }
+];
+
+export const INITIAL_PLANS: SubscriptionPlan[] = [
+  {
+    id: 'plan_mensal',
+    name: 'Plano Mensal Gato Net',
+    badge: 'Estrutura Futura',
+    price: 24.90,
+    periodLabel: 'por mês (em preparação para etapas futuras)',
+    durationMonths: 1,
+    features: [
+      'Acesso aos canais da plataforma',
+      'Compatível com Smart TV, PC e Smartphone',
+      'Configuração para etapas posteriores'
+    ]
+  },
+  {
+    id: 'plan_trimestral',
+    name: 'Plano Trimestral',
+    badge: 'Estrutura Futura',
+    price: 59.90,
+    periodLabel: 'por 3 meses (em preparação para etapas futuras)',
+    durationMonths: 3,
+    isPopular: true,
+    features: [
+      'Acesso expandido aos canais',
+      'Compatível com múltiplos dispositivos',
+      'Configuração para etapas posteriores'
+    ]
+  },
+  {
+    id: 'plan_anual',
+    name: 'Plano Anual',
+    badge: 'Estrutura Futura',
+    price: 199.90,
+    periodLabel: 'por ano (em preparação para etapas futuras)',
+    durationMonths: 12,
+    features: [
+      'Acesso anual à plataforma',
+      'Configuração para etapas posteriores'
+    ]
+  }
+];
+
+export const INITIAL_AD_SLOTS: AdSlot[] = [
+  {
+    id: 'ad_header',
+    slotType: 'header',
+    title: 'Espaço Publicitário Reservado',
+    subtitle: 'Área reservada para veiculação de parceiros institucionais',
+    targetUrl: '#',
+    isEnabled: false,
+    dimensions: '728x90 px (Leaderboard)',
+    codeSnippet: '<!-- Espaço reservado para banner 728x90 -->'
+  },
+  {
+    id: 'ad_player_side',
+    slotType: 'player_side',
+    title: 'Espaço Publicitário Reservado',
+    subtitle: 'Área reservada para parceiros e anunciantes da Gato Net.',
+    targetUrl: '#',
+    isEnabled: true,
+    dimensions: '300x250 px (Medium Rectangle)',
+    codeSnippet: '<!-- Banner reservado lateral do player -->'
+  },
+  {
+    id: 'ad_player_bottom',
+    slotType: 'player_bottom',
+    title: 'Espaço Publicitário Reservado',
+    subtitle: 'Área reservada para comunicação institucional e anunciantes parceiros.',
+    targetUrl: '#',
+    isEnabled: true,
+    dimensions: '970x90 px / 728x90 px',
+    codeSnippet: '<!-- Banner horizontal abaixo do reprodutor -->'
+  },
+  {
+    id: 'ad_inter_categories',
+    slotType: 'inter_categories',
+    title: 'Espaço Publicitário Reservado',
+    subtitle: 'Área reservada entre seções de categorias',
+    targetUrl: '#',
+    isEnabled: false,
+    dimensions: '100% largura x 120 px',
+    codeSnippet: '<!-- Banner inter-categorias -->'
+  },
+  {
+    id: 'ad_footer',
+    slotType: 'footer',
+    title: 'Espaço Publicitário Reservado',
+    subtitle: 'Área reservada no rodapé da plataforma',
+    targetUrl: '#',
+    isEnabled: true,
+    dimensions: '728x90 px ou Responsivo',
+    codeSnippet: '<!-- Banner final de rodapé -->'
+  }
+];
+
+export const INITIAL_PAYMENT_SETTINGS: PaymentSettings = {
+  pix: {
+    key: 'financeiro@gatonet.tv.br',
+    keyType: 'Email',
+    recipientName: 'Gato Net Streaming e Mídia Ltda',
+    city: 'São Paulo',
+    enabled: false
+  },
+  paypal: {
+    paymentLink: 'https://paypal.me/gatonettv',
+    businessEmail: 'payments@gatonet.tv',
+    enabled: false
+  }
+};
+
+export const INITIAL_SYSTEM_SETTINGS: SystemSettings = {
+  siteName: 'Gato Net',
+  tagline: 'Plataforma Profissional de Televisão Ao Vivo',
+  logoUrl: '',
+  faviconUrl: '',
+  primaryColor: '#060911',
+  darkNavyColor: '#0b1329',
+  electricBlueColor: '#2563eb',
+  accessMode: 'free', // Default: Modo 1 - Gratuito sem cadastro
+  allowPublicChannelBrowse: true,
+  maxSimultaneousStreams: 2,
+  vpsSpecs: {
+    os: 'Ubuntu 24.04 LTS (Noble Numbat)',
+    cpu: '3 vCPU AMD EPYC',
+    ram: '6 GB DDR4 ECC',
+    storage: '50 GB NVMe SSD',
+    bandwidth: '200 Mbps Dedicados Virtarix',
+    database: 'PostgreSQL 16 (Local na VPS)'
+  },
+  streamRelayEnabled: false
+};
+
+export const INITIAL_DEMO_SUBSCRIBERS: UserSubscriber[] = [
+  {
+    id: 'sub_1',
+    fullName: 'Carlos Eduardo Silva',
+    whatsapp: '(11) 98765-4321',
+    email: 'carlos.silva@exemplo.com.br',
+    createdAt: '2026-10-01',
+    status: 'active',
+    planId: 'plan_trimestral',
+    planName: 'Plano Trimestral',
+    expiresAt: '2027-01-01',
+    notes: 'Cadastro em estrutura administrativa'
+  },
+  {
+    id: 'sub_2',
+    fullName: 'Mariana Guimarães Rocha',
+    whatsapp: '(21) 99123-5566',
+    email: 'mariana.rocha@exemplo.com.br',
+    createdAt: '2026-10-10',
+    status: 'active',
+    planId: 'plan_anual',
+    planName: 'Plano Anual',
+    expiresAt: '2027-10-10',
+    notes: 'Cadastro em estrutura administrativa'
+  }
+];

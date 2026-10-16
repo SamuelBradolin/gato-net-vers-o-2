@@ -1,0 +1,6 @@
+{
+  "name": "Gato Net - Plataforma de TV Ao Vivo",
+  "description": "Plataforma profissional de televisão ao vivo e streaming com canais abertos, esportes, notícias, filmes e séries, preparada para computadores, celulares e Smart TVs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
