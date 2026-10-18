@@ -14,6 +14,7 @@ interface HeaderProps {
   onOpenAuth: () => void;
   onOpenAdmin: () => void;
   onOpenPlans?: () => void;
+  onOpenSessions?: () => void;
   onOpenRemoteGuide: () => void;
   userEmail?: string | null;
   isAdminMode: boolean;
@@ -25,6 +26,8 @@ export const Header: React.FC<HeaderProps> = ({
   customLogoUrl,
   onOpenAuth,
   onOpenAdmin,
+  onOpenPlans,
+  onOpenSessions,
   onOpenRemoteGuide,
   userEmail,
   isAdminMode,
@@ -101,6 +104,18 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="sm:hidden">Admin</span>
           </button>
 
+          {/* Subscriber Simultaneous Screens Control */}
+          {userEmail && onOpenSessions && (
+            <button
+              onClick={onOpenSessions}
+              className="px-3 py-2 text-xs font-semibold rounded-lg bg-blue-950/80 hover:bg-blue-900 border border-blue-500/30 text-blue-300 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 tv-focus-target"
+              title="Gerenciar Telas Simultâneas da sua Assinatura"
+            >
+              <Tv className="w-3.5 h-3.5 text-blue-400" />
+              <span className="hidden sm:inline">Minhas Telas</span>
+            </button>
+          )}
+
           {/* Reserved Login / Cadastro Area */}
           <button
             onClick={onOpenAuth}
@@ -136,6 +151,18 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <div className="flex flex-col gap-2 text-sm font-medium text-slate-300">
+            {userEmail && onOpenSessions && (
+              <button
+                onClick={() => {
+                  onOpenSessions();
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full text-left py-2 px-3 rounded-lg bg-blue-950/60 border border-blue-800/40 text-blue-300 flex items-center gap-2 text-xs font-semibold"
+              >
+                <Tv className="w-4 h-4 text-blue-400" />
+                <span>Gerenciar Minhas Telas Simultâneas</span>
+              </button>
+            )}
             <a
               href="#canais"
               onClick={() => setMobileMenuOpen(false)}

@@ -396,40 +396,65 @@ export const INITIAL_PLANS: SubscriptionPlan[] = [
   {
     id: 'plan_mensal',
     name: 'Plano Mensal Gato Net',
-    badge: 'Estrutura Futura',
+    badge: 'Exemplo Editável',
     price: 24.90,
-    periodLabel: 'por mês (em preparação para etapas futuras)',
+    periodLabel: 'por 30 dias',
+    durationDays: 30,
     durationMonths: 1,
+    description: 'Acesso mensal flexível com suporte aos principais dispositivos.',
+    maxScreens: 1,
+    allowedScope: 'all',
+    allowedCategoryIds: [],
+    allowedChannelIds: [],
+    isActive: true,
+    displayOrder: 1,
     features: [
-      'Acesso aos canais da plataforma',
+      'Acesso aos canais liberados',
       'Compatível com Smart TV, PC e Smartphone',
-      'Configuração para etapas posteriores'
+      '1 tela simultânea'
     ]
   },
   {
     id: 'plan_trimestral',
     name: 'Plano Trimestral',
-    badge: 'Estrutura Futura',
+    badge: 'Mais Popular',
     price: 59.90,
-    periodLabel: 'por 3 meses (em preparação para etapas futuras)',
+    periodLabel: 'por 90 dias',
+    durationDays: 90,
     durationMonths: 3,
+    description: 'Economia trimestral com suporte para 2 telas simultâneas.',
+    maxScreens: 2,
+    allowedScope: 'all',
+    allowedCategoryIds: [],
+    allowedChannelIds: [],
     isPopular: true,
+    isActive: true,
+    displayOrder: 2,
     features: [
-      'Acesso expandido aos canais',
-      'Compatível com múltiplos dispositivos',
-      'Configuração para etapas posteriores'
+      'Acesso completo a todos os canais',
+      'Até 2 telas simultâneas',
+      'Suporte prioritário via WhatsApp'
     ]
   },
   {
     id: 'plan_anual',
     name: 'Plano Anual',
-    badge: 'Estrutura Futura',
+    badge: 'Maior Economia',
     price: 199.90,
-    periodLabel: 'por ano (em preparação para etapas futuras)',
+    periodLabel: 'por 365 dias',
+    durationDays: 365,
     durationMonths: 12,
+    description: 'Acesso anual completo para toda a família em até 4 telas simultâneas.',
+    maxScreens: 4,
+    allowedScope: 'all',
+    allowedCategoryIds: [],
+    allowedChannelIds: [],
+    isActive: true,
+    displayOrder: 3,
     features: [
-      'Acesso anual à plataforma',
-      'Configuração para etapas posteriores'
+      'Acesso anual ininterrupto',
+      'Até 4 telas simultâneas',
+      'Suporte VIP via WhatsApp'
     ]
   }
 ];

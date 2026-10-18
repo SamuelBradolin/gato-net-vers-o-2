@@ -1,0 +1,2122 @@
+import {
+  AdminUser,
+  AdminSession,
+  AdminAuditLog,
+  DbCategory,
+  DbChannel,
+  BackupStreamItem,
+  DbStreamSource,
+  DbSubscriber,
+  DbSubscriptionPlan,
+  DbPaymentConfigs,
+  DbAppearanceConfigs,
+  DbAdSlot,
+  DbAccessModes,
+  DbPlaybackSession,
+  DbManualOrder,
+  PasswordResetToken
+} from './schema.js';
+import { loadDatabase, saveDatabase } from './fileStorage.js';
+import { getPostgresPool, isPostgresActive } from './postgres.js';
+import { generatePixCopyPaste } from '../utils/pix.js';
+import { validateStreamUrl } from '../utils/security.js';
+import crypto from 'crypto';
+
+// ==========================================
+// 1. ADMINS & PERMISSIONS
+// ==========================================
+export async function countAdmins(): Promise<number> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT COUNT(*) as count FROM admins WHERE is_active = true');
+    return parseInt(res.rows[0].count, 10);
+  }
+  const db = loadDatabase();
+  return db.admins.filter(a => a.is_active).length;
+}
+
+export async function findAdminByEmail(email: string): Promise<AdminUser | null> {
+  const cleanEmail = email.toLowerCase().trim();
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT * FROM admins WHERE LOWER(email) = $1 LIMIT 1', [cleanEmail]);
+    return res.rows[0] || null;
+  }
+  const db = loadDatabase();
+  return db.admins.find(a => a.email.toLowerCase() === cleanEmail) || null;
+}
+
+export async function getAdminById(id: string): Promise<AdminUser | null> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT * FROM admins WHERE id = $1 LIMIT 1', [id]);
+    return res.rows[0] || null;
+  }
+  const db = loadDatabase();
+  return db.admins.find(a => a.id === id) || null;
+}
+
+export async function createAdmin(admin: Omit<AdminUser, 'id' | 'created_at' | 'updated_at'>): Promise<AdminUser> {
+  const id = `admin_${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+  const newAdmin: AdminUser = {
+    ...admin,
+    id,
+    created_at: now,
+    updated_at: now
+  };
+
+  if (isPostgresActive()) {
+    await getPostgresPool()!.query(
+      `INSERT INTO admins (id, name, email, password_hash, role, is_active, failed_attempts, locked_until, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [newAdmin.id, newAdmin.name, newAdmin.email, newAdmin.password_hash, newAdmin.role, newAdmin.is_active, newAdmin.failed_attempts, newAdmin.locked_until, newAdmin.created_at, newAdmin.updated_at]
+    );
+    return newAdmin;
+  }
+
+  const db = loadDatabase();
+  db.admins.push(newAdmin);
+  saveDatabase(db);
+  return newAdmin;
+}
+
+export async function updateAdmin(id: string, updates: Partial<AdminUser>): Promise<AdminUser | null> {
+  const now = new Date().toISOString();
+  if (isPostgresActive()) {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    for (const [key, val] of Object.entries(updates)) {
+      fields.push(`${key} = $${idx}`);
+      values.push(val);
+      idx++;
+    }
+    fields.push(`updated_at = $${idx}`);
+    values.push(now);
+    values.push(id);
+
+    const query = `UPDATE admins SET ${fields.join(', ')} WHERE id = $${idx + 1} RETURNING *`;
+    const res = await getPostgresPool()!.query(query, values);
+    return res.rows[0] || null;
+  }
+
+  const db = loadDatabase();
+  const index = db.admins.findIndex(a => a.id === id);
+  if (index === -1) return null;
+
+  db.admins[index] = { ...db.admins[index], ...updates, updated_at: now };
+  saveDatabase(db);
+  return db.admins[index];
+}
+
+// ==========================================
+// 2. SESSIONS & COOKIES
+// ==========================================
+export async function createAdminSession(adminId: string, tokenHash: string, ip: string | null, userAgent: string | null, expiresInHours = 24): Promise<AdminSession> {
+  const id = `sess_${crypto.randomUUID()}`;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + expiresInHours * 60 * 60 * 1000).toISOString();
+
+  const session: AdminSession = {
+    id,
+    admin_id: adminId,
+    token_hash: tokenHash,
+    ip_address: ip,
+    user_agent: userAgent,
+    expires_at: expiresAt,
+    created_at: now.toISOString()
+  };
+
+  if (isPostgresActive()) {
+    await getPostgresPool()!.query(
+      `INSERT INTO admin_sessions (id, admin_id, token_hash, ip_address, user_agent, expires_at, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [session.id, session.admin_id, session.token_hash, session.ip_address, session.user_agent, session.expires_at, session.created_at]
+    );
+    return session;
+  }
+
+  const db = loadDatabase();
+  // Clean expired sessions
+  const nowIso = now.toISOString();
+  db.admin_sessions = db.admin_sessions.filter(s => s.expires_at > nowIso);
+  db.admin_sessions.push(session);
+  saveDatabase(db);
+  return session;
+}
+
+export async function findAdminSession(tokenHash: string): Promise<{ session: AdminSession; admin: AdminUser } | null> {
+  const nowIso = new Date().toISOString();
+
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query(
+      `SELECT s.*, a.name, a.email, a.role, a.is_active, a.locked_until
+       FROM admin_sessions s
+       JOIN admins a ON a.id = s.admin_id
+       WHERE s.token_hash = $1 AND s.expires_at > $2 AND a.is_active = true
+       LIMIT 1`,
+      [tokenHash, nowIso]
+    );
+
+    if (res.rows.length === 0) return null;
+    const row = res.rows[0];
+    const session: AdminSession = {
+      id: row.id,
+      admin_id: row.admin_id,
+      token_hash: row.token_hash,
+      ip_address: row.ip_address,
+      user_agent: row.user_agent,
+      expires_at: row.expires_at,
+      created_at: row.created_at
+    };
+    const admin: AdminUser = {
+      id: row.admin_id,
+      name: row.name,
+      email: row.email,
+      password_hash: '',
+      role: row.role,
+      is_active: row.is_active,
+      failed_attempts: 0,
+      locked_until: row.locked_until,
+      last_login_at: null,
+      created_at: '',
+      updated_at: ''
+    };
+    return { session, admin };
+  }
+
+  const db = loadDatabase();
+  const session = db.admin_sessions.find(s => s.token_hash === tokenHash && s.expires_at > nowIso);
+  if (!session) return null;
+
+  const admin = db.admins.find(a => a.id === session.admin_id && a.is_active);
+  if (!admin) return null;
+
+  return { session, admin };
+}
+
+export async function deleteAdminSession(tokenHash: string): Promise<void> {
+  if (isPostgresActive()) {
+    await getPostgresPool()!.query('DELETE FROM admin_sessions WHERE token_hash = $1', [tokenHash]);
+    return;
+  }
+  const db = loadDatabase();
+  db.admin_sessions = db.admin_sessions.filter(s => s.token_hash !== tokenHash);
+  saveDatabase(db);
+}
+
+export async function deleteAllAdminSessions(adminId: string): Promise<void> {
+  if (isPostgresActive()) {
+    await getPostgresPool()!.query('DELETE FROM admin_sessions WHERE admin_id = $1', [adminId]);
+    return;
+  }
+  const db = loadDatabase();
+  db.admin_sessions = db.admin_sessions.filter(s => s.admin_id !== adminId);
+  saveDatabase(db);
+}
+
+export async function createPasswordResetToken(adminId: string, tokenHash: string, expiresInMinutes = 15): Promise<PasswordResetToken> {
+  const id = `reset_${crypto.randomUUID()}`;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + expiresInMinutes * 60 * 1000).toISOString();
+
+  const token: PasswordResetToken = {
+    id,
+    admin_id: adminId,
+    token_hash: tokenHash,
+    expires_at: expiresAt,
+    used: false,
+    created_at: now.toISOString()
+  };
+
+  if (isPostgresActive()) {
+    await getPostgresPool()!.query(
+      `INSERT INTO password_reset_tokens (id, admin_id, token_hash, expires_at, used, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [token.id, token.admin_id, token.token_hash, token.expires_at, token.used, token.created_at]
+    );
+    return token;
+  }
+
+  const db = loadDatabase();
+  if (!db.password_reset_tokens) db.password_reset_tokens = [];
+  db.password_reset_tokens.push(token);
+  saveDatabase(db);
+  return token;
+}
+
+export async function findPasswordResetToken(tokenHash: string): Promise<{ token: PasswordResetToken; admin: AdminUser } | null> {
+  const nowIso = new Date().toISOString();
+
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query(
+      `SELECT t.*, a.id as a_id, a.name, a.email, a.role, a.is_active, a.failed_attempts, a.locked_until
+       FROM password_reset_tokens t
+       JOIN admins a ON a.id = t.admin_id
+       WHERE t.token_hash = $1 AND t.used = false AND t.expires_at > $2 AND a.is_active = true
+       LIMIT 1`,
+      [tokenHash, nowIso]
+    );
+
+    if (res.rows.length === 0) return null;
+    const row = res.rows[0];
+    const token: PasswordResetToken = {
+      id: row.id,
+      admin_id: row.admin_id,
+      token_hash: row.token_hash,
+      expires_at: row.expires_at,
+      used: row.used,
+      created_at: row.created_at
+    };
+    const admin: AdminUser = {
+      id: row.a_id,
+      name: row.name,
+      email: row.email,
+      password_hash: '',
+      role: row.role,
+      is_active: row.is_active,
+      failed_attempts: row.failed_attempts,
+      locked_until: row.locked_until,
+      last_login_at: null,
+      created_at: '',
+      updated_at: ''
+    };
+    return { token, admin };
+  }
+
+  const db = loadDatabase();
+  if (!db.password_reset_tokens) db.password_reset_tokens = [];
+  const token = db.password_reset_tokens.find(t => t.token_hash === tokenHash && !t.used && t.expires_at > nowIso);
+  if (!token) return null;
+
+  const admin = db.admins.find(a => a.id === token.admin_id && a.is_active);
+  if (!admin) return null;
+
+  return { token, admin };
+}
+
+export async function markPasswordResetTokenUsed(tokenHash: string): Promise<void> {
+  if (isPostgresActive()) {
+    await getPostgresPool()!.query('UPDATE password_reset_tokens SET used = true WHERE token_hash = $1', [tokenHash]);
+    return;
+  }
+  const db = loadDatabase();
+  if (!db.password_reset_tokens) return;
+  const token = db.password_reset_tokens.find(t => t.token_hash === tokenHash);
+  if (token) {
+    token.used = true;
+    saveDatabase(db);
+  }
+}
+
+export async function updateAdminPassword(adminId: string, newPasswordHash: string): Promise<void> {
+  await updateAdmin(adminId, {
+    password_hash: newPasswordHash,
+    failed_attempts: 0,
+    locked_until: null
+  });
+  await deleteAllAdminSessions(adminId);
+}
+
+
+// ==========================================
+// 3. AUDIT LOGS
+// ==========================================
+export async function createAuditLog(
+  adminId: string | null,
+  adminEmail: string,
+  action: string,
+  entityType: string,
+  entityId: string | null,
+  details: Record<string, any> | null,
+  ip: string | null
+): Promise<AdminAuditLog> {
+  const log: AdminAuditLog = {
+    id: `log_${crypto.randomUUID()}`,
+    admin_id: adminId,
+    admin_email: adminEmail,
+    action,
+    entity_type: entityType,
+    entity_id: entityId,
+    details,
+    ip_address: ip,
+    created_at: new Date().toISOString()
+  };
+
+  if (isPostgresActive()) {
+    await getPostgresPool()!.query(
+      `INSERT INTO admin_audit_logs (id, admin_id, admin_email, action, entity_type, entity_id, details, ip_address, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [log.id, log.admin_id, log.admin_email, log.action, log.entity_type, log.entity_id, JSON.stringify(log.details), log.ip_address, log.created_at]
+    );
+    return log;
+  }
+
+  const db = loadDatabase();
+  db.admin_audit_logs.unshift(log);
+  if (db.admin_audit_logs.length > 500) {
+    db.admin_audit_logs = db.admin_audit_logs.slice(0, 500);
+  }
+  saveDatabase(db);
+  return log;
+}
+
+export async function getAuditLogs(limit = 50): Promise<AdminAuditLog[]> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT * FROM admin_audit_logs ORDER BY created_at DESC LIMIT $1', [limit]);
+    return res.rows;
+  }
+  const db = loadDatabase();
+  return db.admin_audit_logs.slice(0, limit);
+}
+
+// ==========================================
+// 4. CHANNELS & CATEGORIES
+// ==========================================
+export async function getCategories(): Promise<DbCategory[]> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT * FROM categories ORDER BY display_order ASC');
+    return res.rows;
+  }
+  const db = loadDatabase();
+  return db.categories.sort((a, b) => a.display_order - b.display_order);
+}
+
+export async function createCategory(cat: Omit<DbCategory, 'created_at' | 'updated_at'>): Promise<DbCategory> {
+  const now = new Date().toISOString();
+  const newCat: DbCategory = { ...cat, created_at: now, updated_at: now };
+
+  if (isPostgresActive()) {
+    await getPostgresPool()!.query(
+      `INSERT INTO categories (id, name, slug, display_order, icon_name, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [newCat.id, newCat.name, newCat.slug, newCat.display_order, newCat.icon_name, newCat.is_active, newCat.created_at, newCat.updated_at]
+    );
+    return newCat;
+  }
+
+  const db = loadDatabase();
+  db.categories.push(newCat);
+  saveDatabase(db);
+  return newCat;
+}
+
+export async function updateCategory(id: string, updates: Partial<DbCategory>): Promise<DbCategory | null> {
+  const now = new Date().toISOString();
+  if (isPostgresActive()) {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    for (const [key, val] of Object.entries(updates)) {
+      if (key === 'id') continue;
+      fields.push(`${key} = $${idx}`);
+      values.push(val);
+      idx++;
+    }
+    fields.push(`updated_at = $${idx}`);
+    values.push(now);
+    values.push(id);
+
+    const query = `UPDATE categories SET ${fields.join(', ')} WHERE id = $${idx + 1} RETURNING *`;
+    const res = await getPostgresPool()!.query(query, values);
+    return res.rows[0] || null;
+  }
+
+  const db = loadDatabase();
+  const idx = db.categories.findIndex(c => c.id === id);
+  if (idx === -1) return null;
+
+  db.categories[idx] = { ...db.categories[idx], ...updates, updated_at: now };
+  saveDatabase(db);
+  return db.categories[idx];
+}
+
+export async function deleteCategory(id: string): Promise<{ success: boolean; message?: string }> {
+  const channels = await getChannels(false);
+  const inUse = channels.some(c => c.category_id === id);
+  if (inUse) {
+    return {
+      success: false,
+      message: 'Não é possível excluir esta categoria pois existem canais associados a ela. Mova os canais antes de excluir.'
+    };
+  }
+
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('DELETE FROM categories WHERE id = $1', [id]);
+    return { success: (res.rowCount || 0) > 0 };
+  }
+
+  const db = loadDatabase();
+  const prevLen = db.categories.length;
+  db.categories = db.categories.filter(c => c.id !== id);
+  saveDatabase(db);
+  return { success: db.categories.length < prevLen };
+}
+
+export async function getChannels(onlyActive = false): Promise<DbChannel[]> {
+  if (isPostgresActive()) {
+    const query = onlyActive
+      ? `SELECT c.*, cat.name as category_name 
+         FROM channels c 
+         LEFT JOIN categories cat ON cat.id = c.category_id 
+         WHERE c.is_active = true AND (c.status IS NULL OR c.status != 'inactive')
+         ORDER BY c.number ASC`
+      : `SELECT c.*, cat.name as category_name 
+         FROM channels c 
+         LEFT JOIN categories cat ON cat.id = c.category_id 
+         ORDER BY c.number ASC`;
+    const res = await getPostgresPool()!.query(query);
+    return res.rows.map(r => ({
+      ...r,
+      alternative_streams: typeof r.alternative_streams === 'string' ? JSON.parse(r.alternative_streams) : (r.alternative_streams || []),
+      status: r.status || (r.is_active ? 'active' : 'inactive'),
+      access_permission: r.access_permission || (r.is_locked ? 'restricted' : 'free')
+    }));
+  }
+  const db = loadDatabase();
+  const list = onlyActive 
+    ? db.channels.filter(c => c.is_active && c.status !== 'inactive') 
+    : db.channels;
+  return list.sort((a, b) => a.number - b.number);
+}
+
+export async function getChannelById(id: string): Promise<DbChannel | null> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query(
+      `SELECT c.*, cat.name as category_name 
+       FROM channels c 
+       LEFT JOIN categories cat ON cat.id = c.category_id 
+       WHERE c.id = $1 LIMIT 1`,
+      [id]
+    );
+    if (!res.rows[0]) return null;
+    const r = res.rows[0];
+    return {
+      ...r,
+      alternative_streams: typeof r.alternative_streams === 'string' ? JSON.parse(r.alternative_streams) : (r.alternative_streams || []),
+      status: r.status || (r.is_active ? 'active' : 'inactive'),
+      access_permission: r.access_permission || (r.is_locked ? 'restricted' : 'free')
+    };
+  }
+  const db = loadDatabase();
+  return db.channels.find(c => c.id === id) || null;
+}
+
+export async function createChannel(channel: Omit<DbChannel, 'created_at' | 'updated_at'>): Promise<DbChannel> {
+  const now = new Date().toISOString();
+  const status = channel.status || (channel.is_active === false ? 'inactive' : 'active');
+  const access_permission = channel.access_permission || (channel.is_locked ? 'restricted' : 'free');
+  const isActive = status !== 'inactive';
+  const isLocked = access_permission === 'restricted';
+
+  const newChan: DbChannel = {
+    ...channel,
+    status,
+    access_permission,
+    is_active: isActive,
+    is_locked: isLocked,
+    created_at: now,
+    updated_at: now
+  };
+
+  if (isPostgresActive()) {
+    try {
+      await getPostgresPool()!.query(
+        `INSERT INTO channels (
+           id, number, name, category_id, logo_url, backup_image_url, stream_url,
+           alternative_streams, resolution, aspect_ratio, current_program, current_program_time,
+           next_program, is_live, is_locked, is_featured, is_active, status, access_permission,
+           description, created_at, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+        [
+          newChan.id,
+          newChan.number,
+          newChan.name,
+          newChan.category_id,
+          newChan.logo_url,
+          newChan.backup_image_url || null,
+          newChan.stream_url,
+          JSON.stringify(newChan.alternative_streams || []),
+          newChan.resolution || '1080p',
+          newChan.aspect_ratio || '16:9',
+          newChan.current_program || 'Transmissão Ao Vivo',
+          newChan.current_program_time || '20:00 - 22:00',
+          newChan.next_program || null,
+          Boolean(newChan.is_live),
+          newChan.is_locked,
+          Boolean(newChan.is_featured),
+          newChan.is_active,
+          newChan.status,
+          newChan.access_permission,
+          newChan.description || '',
+          newChan.created_at,
+          newChan.updated_at
+        ]
+      );
+    } catch (err: any) {
+      console.warn('[PostgreSQL] createChannel full insert fallback:', err.message);
+      // Fallback without new columns if migration is pending
+      await getPostgresPool()!.query(
+        `INSERT INTO channels (
+           id, number, name, category_id, logo_url, backup_image_url, stream_url,
+           alternative_streams, resolution, aspect_ratio, current_program, current_program_time,
+           next_program, is_live, is_locked, is_featured, is_active, description, created_at, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+        [
+          newChan.id,
+          newChan.number,
+          newChan.name,
+          newChan.category_id,
+          newChan.logo_url,
+          newChan.backup_image_url || null,
+          newChan.stream_url,
+          JSON.stringify(newChan.alternative_streams || []),
+          newChan.resolution || '1080p',
+          newChan.aspect_ratio || '16:9',
+          newChan.current_program || 'Transmissão Ao Vivo',
+          newChan.current_program_time || '20:00 - 22:00',
+          newChan.next_program || null,
+          Boolean(newChan.is_live),
+          newChan.is_locked,
+          Boolean(newChan.is_featured),
+          newChan.is_active,
+          newChan.description || '',
+          newChan.created_at,
+          newChan.updated_at
+        ]
+      );
+    }
+    return newChan;
+  }
+
+  const db = loadDatabase();
+  db.channels.push(newChan);
+  saveDatabase(db);
+  return newChan;
+}
+
+export async function updateChannel(id: string, updates: Partial<DbChannel>): Promise<DbChannel | null> {
+  const now = new Date().toISOString();
+  
+  if (updates.status !== undefined) {
+    updates.is_active = updates.status !== 'inactive';
+  }
+  if (updates.access_permission !== undefined) {
+    updates.is_locked = updates.access_permission === 'restricted';
+  }
+
+  if (isPostgresActive()) {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    for (const [key, val] of Object.entries(updates)) {
+      if (key === 'id') continue;
+      fields.push(`${key} = $${idx}`);
+      values.push(key === 'alternative_streams' ? JSON.stringify(val) : val);
+      idx++;
+    }
+    fields.push(`updated_at = $${idx}`);
+    values.push(now);
+    values.push(id);
+
+    try {
+      const query = `UPDATE channels SET ${fields.join(', ')} WHERE id = $${idx + 1} RETURNING *`;
+      const res = await getPostgresPool()!.query(query, values);
+      if (res.rows[0]) {
+        const r = res.rows[0];
+        return {
+          ...r,
+          alternative_streams: typeof r.alternative_streams === 'string' ? JSON.parse(r.alternative_streams) : (r.alternative_streams || []),
+          status: r.status || (r.is_active ? 'active' : 'inactive'),
+          access_permission: r.access_permission || (r.is_locked ? 'restricted' : 'free')
+        };
+      }
+    } catch (err: any) {
+      console.warn('[PostgreSQL] updateChannel error:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const index = db.channels.findIndex(c => c.id === id);
+  if (index === -1) return null;
+
+  db.channels[index] = { ...db.channels[index], ...updates, updated_at: now };
+  saveDatabase(db);
+  return db.channels[index];
+}
+
+export async function deleteChannel(id: string): Promise<boolean> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('DELETE FROM channels WHERE id = $1', [id]);
+    return (res.rowCount || 0) > 0;
+  }
+  const db = loadDatabase();
+  const prevLen = db.channels.length;
+  db.channels = db.channels.filter(c => c.id !== id);
+  saveDatabase(db);
+  return db.channels.length < prevLen;
+}
+
+// ==========================================
+// 5. STREAM SOURCES
+// ==========================================
+export async function getStreamSources(): Promise<DbStreamSource[]> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT * FROM stream_sources ORDER BY is_primary DESC, created_at ASC');
+    return res.rows;
+  }
+  const db = loadDatabase();
+  return db.stream_sources;
+}
+
+// ==========================================
+// 6. SUBSCRIBERS
+// ==========================================
+export async function getSubscribers(): Promise<DbSubscriber[]> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT * FROM subscribers ORDER BY created_at DESC');
+    return res.rows;
+  }
+  const db = loadDatabase();
+  return db.subscribers;
+}
+
+export async function createSubscriber(subscriber: Omit<DbSubscriber, 'id' | 'created_at' | 'updated_at'>): Promise<DbSubscriber> {
+  const id = `sub_${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+  const newSub: DbSubscriber = { ...subscriber, id, created_at: now, updated_at: now };
+
+  if (isPostgresActive()) {
+    await getPostgresPool()!.query(
+      `INSERT INTO subscribers (id, full_name, whatsapp, email, password_hash, status, notes, plan_id, plan_name, expires_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [newSub.id, newSub.full_name, newSub.whatsapp, newSub.email, newSub.password_hash || '', newSub.status, newSub.notes || null, newSub.plan_id || null, newSub.plan_name || null, newSub.expires_at || null, newSub.created_at, newSub.updated_at]
+    );
+    return newSub;
+  }
+
+  const db = loadDatabase();
+  db.subscribers.unshift(newSub);
+  saveDatabase(db);
+  return newSub;
+}
+
+export async function updateSubscriber(id: string, updates: Partial<DbSubscriber>): Promise<DbSubscriber | null> {
+  const now = new Date().toISOString();
+  if (isPostgresActive()) {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    for (const [key, val] of Object.entries(updates)) {
+      fields.push(`${key} = $${idx}`);
+      values.push(val);
+      idx++;
+    }
+    fields.push(`updated_at = $${idx}`);
+    values.push(now);
+    values.push(id);
+
+    const query = `UPDATE subscribers SET ${fields.join(', ')} WHERE id = $${idx + 1} RETURNING *`;
+    const res = await getPostgresPool()!.query(query, values);
+    return res.rows[0] || null;
+  }
+
+  const db = loadDatabase();
+  const index = db.subscribers.findIndex(s => s.id === id);
+  if (index === -1) return null;
+
+  db.subscribers[index] = { ...db.subscribers[index], ...updates, updated_at: now };
+  saveDatabase(db);
+  return db.subscribers[index];
+}
+
+// ==========================================
+// 7. SUBSCRIPTION PLANS (TOTALMENTE EDITÁVEIS)
+// ==========================================
+export async function getSubscriptionPlans(onlyActive = false): Promise<DbSubscriptionPlan[]> {
+  if (isPostgresActive()) {
+    const query = onlyActive
+      ? 'SELECT * FROM subscription_plans WHERE is_active = true ORDER BY display_order ASC, price ASC'
+      : 'SELECT * FROM subscription_plans ORDER BY display_order ASC, price ASC';
+    const res = await getPostgresPool()!.query(query);
+    return res.rows.map(r => ({
+      ...r,
+      price: parseFloat(r.price),
+      duration_days: r.duration_days || (r.duration_months ? r.duration_months * 30 : 30),
+      features: typeof r.features === 'string' ? JSON.parse(r.features) : (r.features || []),
+      allowed_category_ids: typeof r.allowed_category_ids === 'string' ? JSON.parse(r.allowed_category_ids) : (r.allowed_category_ids || []),
+      allowed_channel_ids: typeof r.allowed_channel_ids === 'string' ? JSON.parse(r.allowed_channel_ids) : (r.allowed_channel_ids || [])
+    }));
+  }
+  const db = loadDatabase();
+  const list = onlyActive ? db.subscription_plans.filter(p => p.is_active) : db.subscription_plans;
+  return list.sort((a, b) => a.display_order - b.display_order);
+}
+
+export async function getSubscriptionPlanById(id: string): Promise<DbSubscriptionPlan | null> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT * FROM subscription_plans WHERE id = $1 LIMIT 1', [id]);
+    if (!res.rows[0]) return null;
+    const r = res.rows[0];
+    return {
+      ...r,
+      price: parseFloat(r.price),
+      duration_days: r.duration_days || (r.duration_months ? r.duration_months * 30 : 30),
+      features: typeof r.features === 'string' ? JSON.parse(r.features) : (r.features || []),
+      allowed_category_ids: typeof r.allowed_category_ids === 'string' ? JSON.parse(r.allowed_category_ids) : (r.allowed_category_ids || []),
+      allowed_channel_ids: typeof r.allowed_channel_ids === 'string' ? JSON.parse(r.allowed_channel_ids) : (r.allowed_channel_ids || [])
+    };
+  }
+  const db = loadDatabase();
+  return db.subscription_plans.find(p => p.id === id) || null;
+}
+
+export async function createSubscriptionPlan(plan: Omit<DbSubscriptionPlan, 'id' | 'created_at' | 'updated_at'>): Promise<DbSubscriptionPlan> {
+  const id = `plan_${crypto.randomUUID().slice(0, 8)}`;
+  const now = new Date().toISOString();
+  const newPlan: DbSubscriptionPlan = {
+    ...plan,
+    id,
+    duration_months: Math.max(1, Math.round((plan.duration_days || 30) / 30)),
+    created_at: now,
+    updated_at: now
+  };
+
+  if (isPostgresActive()) {
+    await getPostgresPool()!.query(
+      `INSERT INTO subscription_plans (
+        id, name, badge, price, period_label, duration_days, duration_months, description,
+        features, max_screens, allowed_scope, allowed_category_ids, allowed_channel_ids,
+        is_popular, is_active, display_order, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+      [
+        newPlan.id, newPlan.name, newPlan.badge, newPlan.price, newPlan.period_label,
+        newPlan.duration_days, newPlan.duration_months, newPlan.description,
+        JSON.stringify(newPlan.features), newPlan.max_screens, newPlan.allowed_scope,
+        JSON.stringify(newPlan.allowed_category_ids), JSON.stringify(newPlan.allowed_channel_ids),
+        newPlan.is_popular, newPlan.is_active, newPlan.display_order, newPlan.created_at, newPlan.updated_at
+      ]
+    );
+    return newPlan;
+  }
+
+  const db = loadDatabase();
+  db.subscription_plans.push(newPlan);
+  saveDatabase(db);
+  return newPlan;
+}
+
+export async function updateSubscriptionPlan(id: string, updates: Partial<DbSubscriptionPlan>): Promise<DbSubscriptionPlan | null> {
+  const now = new Date().toISOString();
+  if (updates.duration_days) {
+    updates.duration_months = Math.max(1, Math.round(updates.duration_days / 30));
+  }
+
+  if (isPostgresActive()) {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    for (const [key, val] of Object.entries(updates)) {
+      if (key === 'id' || key === 'created_at') continue;
+      fields.push(`${key} = $${idx}`);
+      if (key === 'features' || key === 'allowed_category_ids' || key === 'allowed_channel_ids') {
+        values.push(JSON.stringify(val));
+      } else {
+        values.push(val);
+      }
+      idx++;
+    }
+    fields.push(`updated_at = $${idx}`);
+    values.push(now);
+    values.push(id);
+
+    const query = `UPDATE subscription_plans SET ${fields.join(', ')} WHERE id = $${idx + 1} RETURNING *`;
+    const res = await getPostgresPool()!.query(query, values);
+    if (!res.rows[0]) return null;
+    const r = res.rows[0];
+    return {
+      ...r,
+      price: parseFloat(r.price),
+      duration_days: r.duration_days,
+      features: typeof r.features === 'string' ? JSON.parse(r.features) : (r.features || []),
+      allowed_category_ids: typeof r.allowed_category_ids === 'string' ? JSON.parse(r.allowed_category_ids) : (r.allowed_category_ids || []),
+      allowed_channel_ids: typeof r.allowed_channel_ids === 'string' ? JSON.parse(r.allowed_channel_ids) : (r.allowed_channel_ids || [])
+    };
+  }
+
+  const db = loadDatabase();
+  const index = db.subscription_plans.findIndex(p => p.id === id);
+  if (index === -1) return null;
+
+  db.subscription_plans[index] = { ...db.subscription_plans[index], ...updates, updated_at: now };
+  saveDatabase(db);
+  return db.subscription_plans[index];
+}
+
+export async function deleteSubscriptionPlan(id: string): Promise<{ success: boolean; archived: boolean; message: string }> {
+  if (isPostgresActive()) {
+    const checkRes = await getPostgresPool()!.query(
+      'SELECT COUNT(*) as count FROM subscribers WHERE plan_id = $1',
+      [id]
+    );
+    const hasSubscribers = parseInt(checkRes.rows[0].count, 10) > 0;
+
+    if (hasSubscribers) {
+      await getPostgresPool()!.query('UPDATE subscription_plans SET is_active = false, updated_at = NOW() WHERE id = $1', [id]);
+      return {
+        success: true,
+        archived: true,
+        message: 'O plano possui assinaturas vinculadas e foi arquivado/desativado para manter o histórico financeiro.'
+      };
+    }
+
+    const delRes = await getPostgresPool()!.query('DELETE FROM subscription_plans WHERE id = $1', [id]);
+    return {
+      success: (delRes.rowCount || 0) > 0,
+      archived: false,
+      message: 'Plano excluído com sucesso.'
+    };
+  }
+
+  const db = loadDatabase();
+  const hasSubscribers = db.subscribers.some(s => s.plan_id === id);
+
+  if (hasSubscribers) {
+    const idx = db.subscription_plans.findIndex(p => p.id === id);
+    if (idx !== -1) {
+      db.subscription_plans[idx].is_active = false;
+      db.subscription_plans[idx].updated_at = new Date().toISOString();
+      saveDatabase(db);
+    }
+    return {
+      success: true,
+      archived: true,
+      message: 'O plano possui assinaturas vinculadas e foi arquivado/desativado para manter o histórico financeiro.'
+    };
+  }
+
+  const prevLen = db.subscription_plans.length;
+  db.subscription_plans = db.subscription_plans.filter(p => p.id !== id);
+  saveDatabase(db);
+  return {
+    success: db.subscription_plans.length < prevLen,
+    archived: false,
+    message: 'Plano excluído com sucesso.'
+  };
+}
+
+// ==========================================
+// 8. PAYMENT CONFIGS (PIX & PAYPAL)
+// ==========================================
+export async function getPaymentConfigs(): Promise<DbPaymentConfigs> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT * FROM payment_configs WHERE id = $1 LIMIT 1', ['primary']);
+    return res.rows[0];
+  }
+  const db = loadDatabase();
+  return db.payment_configs;
+}
+
+export async function updatePaymentConfigs(updates: Partial<DbPaymentConfigs>): Promise<DbPaymentConfigs> {
+  const now = new Date().toISOString();
+  if (isPostgresActive()) {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    for (const [key, val] of Object.entries(updates)) {
+      if (key === 'id') continue;
+      fields.push(`${key} = $${idx}`);
+      values.push(val);
+      idx++;
+    }
+    fields.push(`updated_at = $${idx}`);
+    values.push(now);
+
+    const query = `UPDATE payment_configs SET ${fields.join(', ')} WHERE id = 'primary' RETURNING *`;
+    const res = await getPostgresPool()!.query(query, values);
+    return res.rows[0];
+  }
+
+  const db = loadDatabase();
+  db.payment_configs = { ...db.payment_configs, ...updates, updated_at: now };
+  saveDatabase(db);
+  return db.payment_configs;
+}
+
+// ==========================================
+// 9. APPEARANCE CONFIGS
+// ==========================================
+export async function getAppearanceConfigs(): Promise<DbAppearanceConfigs> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT * FROM appearance_configs WHERE id = $1 LIMIT 1', ['primary']);
+    return res.rows[0];
+  }
+  const db = loadDatabase();
+  return db.appearance_configs;
+}
+
+export async function updateAppearanceConfigs(updates: Partial<DbAppearanceConfigs>): Promise<DbAppearanceConfigs> {
+  const now = new Date().toISOString();
+  if (isPostgresActive()) {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    for (const [key, val] of Object.entries(updates)) {
+      if (key === 'id') continue;
+      fields.push(`${key} = $${idx}`);
+      values.push(val);
+      idx++;
+    }
+    fields.push(`updated_at = $${idx}`);
+    values.push(now);
+
+    const query = `UPDATE appearance_configs SET ${fields.join(', ')} WHERE id = 'primary' RETURNING *`;
+    const res = await getPostgresPool()!.query(query, values);
+    return res.rows[0];
+  }
+
+  const db = loadDatabase();
+  db.appearance_configs = { ...db.appearance_configs, ...updates, updated_at: now };
+  saveDatabase(db);
+  return db.appearance_configs;
+}
+
+// ==========================================
+// 10. AD SLOTS
+// ==========================================
+export async function getAdSlots(): Promise<DbAdSlot[]> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT * FROM ad_slots ORDER BY id ASC');
+    return res.rows;
+  }
+  const db = loadDatabase();
+  return db.ad_slots;
+}
+
+export async function updateAdSlot(id: string, updates: Partial<DbAdSlot>): Promise<DbAdSlot | null> {
+  const now = new Date().toISOString();
+  if (isPostgresActive()) {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    for (const [key, val] of Object.entries(updates)) {
+      if (key === 'id') continue;
+      fields.push(`${key} = $${idx}`);
+      values.push(val);
+      idx++;
+    }
+    fields.push(`updated_at = $${idx}`);
+    values.push(now);
+    values.push(id);
+
+    const query = `UPDATE ad_slots SET ${fields.join(', ')} WHERE id = $${idx + 1} RETURNING *`;
+    const res = await getPostgresPool()!.query(query, values);
+    return res.rows[0] || null;
+  }
+
+  const db = loadDatabase();
+  const index = db.ad_slots.findIndex(a => a.id === id);
+  if (index === -1) return null;
+
+  db.ad_slots[index] = { ...db.ad_slots[index], ...updates, updated_at: now };
+  saveDatabase(db);
+  return db.ad_slots[index];
+}
+
+// ==========================================
+// 11. ACCESS MODES (1, 2, 3)
+// ==========================================
+export async function getAccessModes(): Promise<DbAccessModes> {
+  if (isPostgresActive()) {
+    const res = await getPostgresPool()!.query('SELECT * FROM access_modes WHERE id = $1 LIMIT 1', ['primary']);
+    return res.rows[0];
+  }
+  const db = loadDatabase();
+  return db.access_modes;
+}
+
+export async function updateAccessModes(updates: Partial<DbAccessModes>): Promise<DbAccessModes> {
+  const now = new Date().toISOString();
+  if (isPostgresActive()) {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    for (const [key, val] of Object.entries(updates)) {
+      if (key === 'id') continue;
+      fields.push(`${key} = $${idx}`);
+      values.push(val);
+      idx++;
+    }
+    fields.push(`updated_at = $${idx}`);
+    values.push(now);
+
+    const query = `UPDATE access_modes SET ${fields.join(', ')} WHERE id = 'primary' RETURNING *`;
+    const res = await getPostgresPool()!.query(query, values);
+    return res.rows[0];
+  }
+
+  const db = loadDatabase();
+  db.access_modes = { ...db.access_modes, ...updates, updated_at: now };
+  saveDatabase(db);
+  return db.access_modes;
+}
+
+// ==========================================
+// 12. PLAYBACK SESSIONS & ACCESS VERIFICATION
+// ==========================================
+export async function verifyPlaybackAccess(
+  channelId: string,
+  userEmail?: string | null
+): Promise<{
+  authorized: boolean;
+  mode: 'free' | 'free_registered' | 'subscription';
+  reason?: string;
+  subscriber?: DbSubscriber | null;
+}> {
+  const accessModes = await getAccessModes();
+  const currentMode = accessModes.current_mode;
+
+  // Modo 1 — Gratuito sem cadastro
+  if (currentMode === 'free') {
+    return {
+      authorized: true,
+      mode: 'free'
+    };
+  }
+
+  // Se não foi fornecido e-mail
+  if (!userEmail) {
+    if (currentMode === 'free_registered') {
+      return {
+        authorized: false,
+        mode: 'free_registered',
+        reason: 'O Modo 2 está ativo: é necessário criar uma conta gratuita para assistir.'
+      };
+    }
+    return {
+      authorized: false,
+      mode: 'subscription',
+      reason: 'O Modo 3 está ativo: faça login para acessar canais protegidos.'
+    };
+  }
+
+  const cleanEmail = userEmail.toLowerCase().trim();
+  const subscribers = await getSubscribers();
+  const subscriber = subscribers.find(s => s.email.toLowerCase() === cleanEmail) || null;
+
+  if (!subscriber) {
+    return {
+      authorized: false,
+      mode: currentMode,
+      reason: 'Usuário não cadastrado na plataforma.'
+    };
+  }
+
+  // Modo 2 — Gratuito com cadastro
+  if (currentMode === 'free_registered') {
+    if (subscriber.status === 'blocked') {
+      return {
+        authorized: false,
+        mode: 'free_registered',
+        reason: 'Sua conta está bloqueada pela moderação.'
+      };
+    }
+    return {
+      authorized: true,
+      mode: 'free_registered',
+      subscriber
+    };
+  }
+
+  // Modo 3 — Assinatura paga
+  const channel = await getChannelById(channelId);
+  if (channel && !channel.is_locked) {
+    return {
+      authorized: true,
+      mode: 'subscription',
+      subscriber
+    };
+  }
+
+  if (subscriber.status !== 'active') {
+    return {
+      authorized: false,
+      mode: 'subscription',
+      reason: subscriber.status === 'pending'
+        ? 'Sua assinatura está aguardando liberação do pagamento via Pix ou PayPal.'
+        : 'Sua assinatura está inativa.'
+    };
+  }
+
+  if (subscriber.expires_at) {
+    const expiryDate = new Date(subscriber.expires_at);
+    const now = new Date();
+    if (expiryDate < now) {
+      await updateSubscriber(subscriber.id, { status: 'expired' });
+      return {
+        authorized: false,
+        mode: 'subscription',
+        reason: 'Sua assinatura venceu. Renove seu plano para continuar assistindo aos canais exclusivos.'
+      };
+    }
+  }
+
+  // Check plan-specific channel/category restrictions if allowed_scope is custom
+  if (subscriber.plan_id && channel) {
+    const plan = await getSubscriptionPlanById(subscriber.plan_id);
+    if (plan && plan.allowed_scope === 'custom') {
+      const allowedCats = plan.allowed_category_ids || [];
+      const allowedChans = plan.allowed_channel_ids || [];
+      const isCatAllowed = allowedCats.includes(channel.category_id);
+      const isChanAllowed = allowedChans.includes(channel.id);
+      if (!isCatAllowed && !isChanAllowed) {
+        return {
+          authorized: false,
+          mode: 'subscription',
+          reason: `Seu plano atual (${plan.name}) não inclui a categoria ou o canal solicitado.`
+        };
+      }
+    }
+  }
+
+  return {
+    authorized: true,
+    mode: 'subscription',
+    subscriber
+  };
+}
+
+// ==========================================
+// 13. PLAYBACK SESSIONS & SIMULTANEOUS SCREENS CONTROL
+// ==========================================
+
+export async function cleanupExpiredPlaybackSessions(timeoutSeconds = 45): Promise<number> {
+  const now = new Date();
+  const threshold = new Date(now.getTime() - timeoutSeconds * 1000).toISOString();
+
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query(
+        `UPDATE playback_sessions
+         SET is_active = false, ended_at = NOW(), ended_reason = 'heartbeat_timeout'
+         WHERE is_active = true AND last_heartbeat < (NOW() - make_interval(secs => $1))`,
+        [timeoutSeconds]
+      );
+      return res.rowCount || 0;
+    } catch (err: any) {
+      console.warn('[PostgreSQL] Failed to cleanup sessions:', err.message);
+      return 0;
+    }
+  }
+
+  const db = loadDatabase();
+  let modified = 0;
+  if (!Array.isArray(db.playback_sessions)) {
+    db.playback_sessions = [];
+  }
+
+  db.playback_sessions = db.playback_sessions.map(s => {
+    if (s.is_active && new Date(s.last_heartbeat).getTime() < new Date(threshold).getTime()) {
+      modified++;
+      return {
+        ...s,
+        is_active: false,
+        ended_at: now.toISOString(),
+        ended_reason: 'heartbeat_timeout'
+      };
+    }
+    return s;
+  });
+
+  if (modified > 0) {
+    saveDatabase(db);
+  }
+  return modified;
+}
+
+export async function getActiveSessionsForSubscriber(subscriberId: string): Promise<DbPlaybackSession[]> {
+  await cleanupExpiredPlaybackSessions();
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query(
+        'SELECT * FROM playback_sessions WHERE subscriber_id = $1 AND is_active = true ORDER BY started_at DESC',
+        [subscriberId]
+      );
+      return res.rows;
+    } catch (err: any) {
+      console.warn('[PostgreSQL] getActiveSessionsForSubscriber fallback:', err.message);
+    }
+  }
+  const db = loadDatabase();
+  return (db.playback_sessions || []).filter(s => s.subscriber_id === subscriberId && s.is_active);
+}
+
+export async function startPlaybackSession(params: {
+  channelId: string;
+  userEmail?: string | null;
+  deviceInfo?: string;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}): Promise<{
+  authorized: boolean;
+  limitReached?: boolean;
+  maxScreens?: number;
+  activeScreensCount?: number;
+  activeSessions?: DbPlaybackSession[];
+  reason?: string;
+  session?: DbPlaybackSession;
+  playbackToken?: string;
+}> {
+  // First clean up expired/abandoned sessions
+  await cleanupExpiredPlaybackSessions();
+
+  const { channelId, userEmail, deviceInfo, ipAddress, userAgent } = params;
+  const channel = await getChannelById(channelId);
+  const channelName = channel ? channel.name : 'Canal Desconhecido';
+
+  const accessCheck = await verifyPlaybackAccess(channelId, userEmail);
+  if (!accessCheck.authorized) {
+    return {
+      authorized: false,
+      reason: accessCheck.reason
+    };
+  }
+
+  const accessModes = await getAccessModes();
+  const currentMode = accessModes.current_mode;
+
+  // Modo 1: Acesso livre sem cadastro
+  if (currentMode === 'free') {
+    const sessionId = `sess_${crypto.randomUUID().slice(0, 12)}`;
+    const playbackToken = `pb_${crypto.randomUUID().replace(/-/g, '')}`;
+    const now = new Date().toISOString();
+    const session: DbPlaybackSession = {
+      id: sessionId,
+      subscriber_id: null,
+      channel_id: channelId,
+      channel_name: channelName,
+      device_info: deviceInfo || 'Navegador Web (Visitante)',
+      playback_token: playbackToken,
+      ip_address: ipAddress || null,
+      user_agent: userAgent || null,
+      started_at: now,
+      last_heartbeat: now,
+      is_active: true
+    };
+
+    if (isPostgresActive()) {
+      try {
+        await getPostgresPool()!.query(
+          `INSERT INTO playback_sessions (id, subscriber_id, channel_id, channel_name, device_info, playback_token, ip_address, user_agent, started_at, last_heartbeat, is_active)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [session.id, session.subscriber_id, session.channel_id, session.channel_name, session.device_info, session.playback_token, session.ip_address, session.user_agent, session.started_at, session.last_heartbeat, session.is_active]
+        );
+      } catch (err: any) {
+        console.warn('[PostgreSQL] startPlaybackSession fallback:', err.message);
+      }
+    }
+
+    const db = loadDatabase();
+    if (!Array.isArray(db.playback_sessions)) db.playback_sessions = [];
+    db.playback_sessions.push(session);
+    saveDatabase(db);
+
+    return {
+      authorized: true,
+      session,
+      playbackToken,
+      maxScreens: 999,
+      activeScreensCount: 1
+    };
+  }
+
+  // Subscriber session control (Modo 2 e 3)
+  const subscriber = accessCheck.subscriber;
+  if (!subscriber) {
+    return {
+      authorized: false,
+      reason: 'Assinante não identificado para controle de telas.'
+    };
+  }
+
+  // Determine max allowed screens from plan
+  let maxScreens = 1;
+  let planName = 'Plano Padrão';
+  if (subscriber.plan_id) {
+    const plan = await getSubscriptionPlanById(subscriber.plan_id);
+    if (plan) {
+      maxScreens = plan.max_screens || 1;
+      planName = plan.name;
+    }
+  }
+
+  // Check active sessions
+  const activeSessions = await getActiveSessionsForSubscriber(subscriber.id);
+
+  // Impede novas sessões quando o limite do plano for atingido
+  if (activeSessions.length >= maxScreens) {
+    return {
+      authorized: false,
+      limitReached: true,
+      maxScreens,
+      activeScreensCount: activeSessions.length,
+      activeSessions,
+      reason: `Limite de telas atingido. O seu plano (${planName}) permite até ${maxScreens} tela(s) simultânea(s). No momento há ${activeSessions.length} aparelho(s) assistindo. Encerre uma das sessões para liberar o acesso.`
+    };
+  }
+
+  const sessionId = `sess_${crypto.randomUUID().slice(0, 12)}`;
+  const playbackToken = `pb_${crypto.randomUUID().replace(/-/g, '')}`;
+  const now = new Date().toISOString();
+
+  const session: DbPlaybackSession = {
+    id: sessionId,
+    subscriber_id: subscriber.id,
+    subscriber_email: subscriber.email,
+    subscriber_name: subscriber.full_name,
+    channel_id: channelId,
+    channel_name: channelName,
+    device_info: deviceInfo || 'Dispositivo Web',
+    playback_token: playbackToken,
+    ip_address: ipAddress || null,
+    user_agent: userAgent || null,
+    started_at: now,
+    last_heartbeat: now,
+    is_active: true
+  };
+
+  if (isPostgresActive()) {
+    try {
+      await getPostgresPool()!.query(
+        `INSERT INTO playback_sessions (id, subscriber_id, channel_id, channel_name, device_info, playback_token, ip_address, user_agent, started_at, last_heartbeat, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [session.id, session.subscriber_id, session.channel_id, session.channel_name, session.device_info, session.playback_token, session.ip_address, session.user_agent, session.started_at, session.last_heartbeat, session.is_active]
+      );
+    } catch (err: any) {
+      console.warn('[PostgreSQL] startPlaybackSession insert fallback:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!Array.isArray(db.playback_sessions)) db.playback_sessions = [];
+  db.playback_sessions.push(session);
+  saveDatabase(db);
+
+  return {
+    authorized: true,
+    session,
+    playbackToken,
+    maxScreens,
+    activeScreensCount: activeSessions.length + 1
+  };
+}
+
+export async function heartbeatPlaybackSession(sessionId: string, playbackToken?: string): Promise<{
+  success: boolean;
+  terminated?: boolean;
+  reason?: string;
+}> {
+  const now = new Date().toISOString();
+
+  if (isPostgresActive()) {
+    try {
+      const checkRes = await getPostgresPool()!.query(
+        'SELECT id, is_active, ended_reason, playback_token FROM playback_sessions WHERE id = $1 LIMIT 1',
+        [sessionId]
+      );
+      if (!checkRes.rows[0]) {
+        return { success: false, terminated: true, reason: 'Sessão inexistente ou expirada' };
+      }
+      const s = checkRes.rows[0];
+      if (playbackToken && s.playback_token && s.playback_token !== playbackToken) {
+        return { success: false, terminated: true, reason: 'Token de reprodução inválido' };
+      }
+      if (!s.is_active) {
+        return { success: false, terminated: true, reason: s.ended_reason || 'Sessão encerrada' };
+      }
+
+      await getPostgresPool()!.query(
+        'UPDATE playback_sessions SET last_heartbeat = NOW() WHERE id = $1',
+        [sessionId]
+      );
+      return { success: true };
+    } catch (err: any) {
+      console.warn('[PostgreSQL] heartbeat error:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const session = (db.playback_sessions || []).find(s => s.id === sessionId);
+  if (!session) {
+    return { success: false, terminated: true, reason: 'Sessão inexistente ou expirada' };
+  }
+  if (playbackToken && session.playback_token && session.playback_token !== playbackToken) {
+    return { success: false, terminated: true, reason: 'Token de reprodução inválido' };
+  }
+  if (!session.is_active) {
+    return { success: false, terminated: true, reason: session.ended_reason || 'Sessão encerrada' };
+  }
+
+  session.last_heartbeat = now;
+  saveDatabase(db);
+  return { success: true };
+}
+
+export async function endPlaybackSession(sessionId: string, reason = 'user_closed', subscriberId?: string): Promise<boolean> {
+  const now = new Date().toISOString();
+
+  if (isPostgresActive()) {
+    try {
+      let query = 'UPDATE playback_sessions SET is_active = false, ended_at = NOW(), ended_reason = $1 WHERE id = $2';
+      const params: any[] = [reason, sessionId];
+      if (subscriberId) {
+        query += ' AND subscriber_id = $3';
+        params.push(subscriberId);
+      }
+      const res = await getPostgresPool()!.query(query, params);
+      return (res.rowCount || 0) > 0;
+    } catch (err: any) {
+      console.warn('[PostgreSQL] endPlaybackSession error:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const session = (db.playback_sessions || []).find(s => s.id === sessionId);
+  if (!session) return false;
+  if (subscriberId && session.subscriber_id !== subscriberId) return false;
+
+  session.is_active = false;
+  session.ended_at = now;
+  session.ended_reason = reason;
+  saveDatabase(db);
+  return true;
+}
+
+export async function terminateSessionByAdmin(sessionId: string, adminEmail: string): Promise<boolean> {
+  return endPlaybackSession(sessionId, `Encerrada pelo administrador (${adminEmail})`);
+}
+
+export async function getSubscriberSessions(subscriberEmail: string): Promise<{
+  subscriber: DbSubscriber | null;
+  maxScreens: number;
+  activeSessions: DbPlaybackSession[];
+  recentSessions: DbPlaybackSession[];
+}> {
+  await cleanupExpiredPlaybackSessions();
+  const cleanEmail = subscriberEmail.toLowerCase().trim();
+  const subscribers = await getSubscribers();
+  const sub = subscribers.find(s => s.email.toLowerCase() === cleanEmail) || null;
+  if (!sub) {
+    return { subscriber: null, maxScreens: 1, activeSessions: [], recentSessions: [] };
+  }
+
+  let maxScreens = 1;
+  if (sub.plan_id) {
+    const plan = await getSubscriptionPlanById(sub.plan_id);
+    if (plan) maxScreens = plan.max_screens || 1;
+  }
+
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query(
+        'SELECT * FROM playback_sessions WHERE subscriber_id = $1 ORDER BY started_at DESC LIMIT 20',
+        [sub.id]
+      );
+      const rows = res.rows;
+      return {
+        subscriber: sub,
+        maxScreens,
+        activeSessions: rows.filter((r: any) => r.is_active),
+        recentSessions: rows
+      };
+    } catch (err: any) {
+      console.warn('[PostgreSQL] getSubscriberSessions error:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const userSessions = (db.playback_sessions || [])
+    .filter(s => s.subscriber_id === sub.id)
+    .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
+
+  return {
+    subscriber: sub,
+    maxScreens,
+    activeSessions: userSessions.filter(s => s.is_active),
+    recentSessions: userSessions.slice(0, 20)
+  };
+}
+
+export async function getPlaybackStatistics(): Promise<any> {
+  await cleanupExpiredPlaybackSessions();
+
+  const subscribers = await getSubscribers();
+  const plans = await getSubscriptionPlans();
+  const channels = await getChannels(false);
+
+  let allSessions: DbPlaybackSession[] = [];
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query('SELECT * FROM playback_sessions ORDER BY started_at DESC LIMIT 100');
+      allSessions = res.rows;
+    } catch (err: any) {
+      console.warn('[PostgreSQL] getPlaybackStatistics sessions query error:', err.message);
+    }
+  }
+
+  if (allSessions.length === 0) {
+    const db = loadDatabase();
+    allSessions = db.playback_sessions || [];
+  }
+
+  const activeSessions = allSessions.filter(s => s.is_active);
+  const activeSessionsCount = activeSessions.length;
+
+  // Plan map for fast screen lookup
+  const planMap = new Map<string, DbSubscriptionPlan>();
+  plans.forEach(p => planMap.set(p.id, p));
+
+  // Channel map for names
+  const channelMap = new Map<string, DbChannel>();
+  channels.forEach(c => channelMap.set(c.id, c));
+
+  // Group active sessions by subscriber
+  const subSessionsMap = new Map<string, DbPlaybackSession[]>();
+  activeSessions.forEach(s => {
+    if (s.subscriber_id) {
+      const arr = subSessionsMap.get(s.subscriber_id) || [];
+      arr.push(s);
+      subSessionsMap.set(s.subscriber_id, arr);
+    }
+  });
+
+  const subscribersWithSessions = Array.from(subSessionsMap.entries()).map(([subId, sessList]) => {
+    const sub = subscribers.find(u => u.id === subId);
+    const plan = sub?.plan_id ? planMap.get(sub.plan_id) : null;
+    return {
+      subscriberId: subId,
+      subscriberName: sub?.full_name || 'Assinante Desconhecido',
+      subscriberEmail: sub?.email || '',
+      planName: plan?.name || sub?.plan_name || 'Plano Padrão',
+      maxScreens: plan?.max_screens || 1,
+      activeSessionsCount: sessList.length,
+      activeSessions: sessList.map(s => ({
+        sessionId: s.id,
+        channelId: s.channel_id,
+        channelName: s.channel_name || channelMap.get(s.channel_id)?.name || 'Canal',
+        deviceInfo: s.device_info || 'Web',
+        startedAt: s.started_at,
+        ipAddress: s.ip_address
+      }))
+    };
+  });
+
+  // Audience by Channel
+  const channelAudienceMap = new Map<string, number>();
+  activeSessions.forEach(s => {
+    const count = channelAudienceMap.get(s.channel_id) || 0;
+    channelAudienceMap.set(s.channel_id, count + 1);
+  });
+
+  const audienceByChannel = channels
+    .map(c => ({
+      channelId: c.id,
+      channelName: c.name,
+      categoryName: c.category_name || '',
+      viewersCount: channelAudienceMap.get(c.id) || 0
+    }))
+    .sort((a, b) => b.viewersCount - a.viewersCount);
+
+  // Recent Sessions History
+  const recentSessionsHistory = allSessions.slice(0, 30).map(s => {
+    const sub = s.subscriber_id ? subscribers.find(u => u.id === s.subscriber_id) : null;
+    const chan = channelMap.get(s.channel_id);
+    const startMs = new Date(s.started_at).getTime();
+    const endMs = s.ended_at ? new Date(s.ended_at).getTime() : new Date(s.last_heartbeat).getTime();
+    const durationSeconds = Math.max(0, Math.round((endMs - startMs) / 1000));
+
+    return {
+      id: s.id,
+      subscriberEmail: s.subscriber_email || sub?.email || (s.subscriber_id ? 'Assinante' : 'Visitante Anônimo'),
+      subscriberName: s.subscriber_name || sub?.full_name || '',
+      channelName: s.channel_name || chan?.name || 'Canal',
+      deviceInfo: s.device_info || 'Web',
+      startedAt: s.started_at,
+      endedAt: s.ended_at,
+      durationSeconds,
+      status: s.is_active ? 'active' : 'ended',
+      endedReason: s.ended_reason,
+      ipAddress: s.ip_address
+    };
+  });
+
+  const totalSubscribers = subscribers.length;
+  const activeSubscribers = subscribers.filter(s => s.status === 'active').length;
+
+  return {
+    totalSubscribers,
+    activeSubscribers,
+    activeSessionsCount,
+    peakConcurrentViewers: Math.max(activeSessionsCount, 1),
+    subscribersWithSessions,
+    audienceByChannel,
+    recentSessionsHistory
+  };
+}
+
+// ==========================================
+// 14. MANUAL PAYMENT ORDERS & FINANCIAL MANAGEMENT
+// ==========================================
+
+export async function createManualOrder(params: {
+  subscriberId?: string;
+  subscriberName?: string;
+  subscriberEmail: string;
+  subscriberWhatsapp?: string;
+  planId: string;
+  paymentMethod: 'pix' | 'paypal';
+  notes?: string;
+}): Promise<DbManualOrder> {
+  const plan = await getSubscriptionPlanById(params.planId);
+  if (!plan) {
+    throw new Error('Plano de assinatura não encontrado');
+  }
+
+  const orderId = `ord_${crypto.randomUUID().slice(0, 12)}`;
+  const orderCode = `PED-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+  const now = new Date().toISOString();
+  const paymentConfigs = await getPaymentConfigs();
+
+  let pixCopyPaste: string | null = null;
+  if (params.paymentMethod === 'pix') {
+    pixCopyPaste = generatePixCopyPaste({
+      key: paymentConfigs.pix_key,
+      recipientName: paymentConfigs.pix_recipient_name,
+      city: paymentConfigs.pix_city,
+      amount: plan.price,
+      txId: orderCode
+    });
+  }
+
+  // Find or determine subscriber_id
+  let subId = params.subscriberId;
+  if (!subId) {
+    const existingSubs = await getSubscribers();
+    const found = existingSubs.find(s => s.email.toLowerCase() === params.subscriberEmail.toLowerCase().trim());
+    if (found) {
+      subId = found.id;
+    } else {
+      // Create initial pending subscriber if not registered yet
+      const newSub = await createSubscriber({
+        full_name: params.subscriberName || 'Cliente Gato Net',
+        whatsapp: params.subscriberWhatsapp || '11999999999',
+        email: params.subscriberEmail.toLowerCase().trim(),
+        status: 'pending',
+        plan_id: plan.id,
+        plan_name: plan.name,
+        notes: `Pedido manual ${orderCode} aguardando comprovante`
+      });
+      subId = newSub.id;
+    }
+  }
+
+  const order: DbManualOrder = {
+    id: orderId,
+    order_code: orderCode,
+    subscriber_id: subId,
+    subscriber_name: params.subscriberName,
+    subscriber_email: params.subscriberEmail.toLowerCase().trim(),
+    subscriber_whatsapp: params.subscriberWhatsapp,
+    plan_id: plan.id,
+    plan_name: plan.name,
+    plan_duration_days: plan.duration_days || 30,
+    payment_method: params.paymentMethod,
+    amount: plan.price,
+    status: 'pending',
+    notes: params.notes || null,
+    receipt_url: null,
+    receipt_code: null,
+    pix_copy_paste: pixCopyPaste,
+    reviewed_by_admin_id: null,
+    reviewed_by_admin_email: null,
+    reviewed_at: null,
+    rejection_reason: null,
+    created_at: now,
+    updated_at: now
+  };
+
+  if (isPostgresActive()) {
+    try {
+      await getPostgresPool()!.query(
+        `INSERT INTO manual_orders (
+           id, order_code, subscriber_id, subscriber_name, subscriber_email, subscriber_whatsapp,
+           plan_id, plan_name, plan_duration_days, payment_method, amount, status, notes,
+           receipt_url, receipt_code, pix_copy_paste, created_at, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+        [
+          order.id,
+          order.order_code,
+          order.subscriber_id,
+          order.subscriber_name || null,
+          order.subscriber_email || null,
+          order.subscriber_whatsapp || null,
+          order.plan_id,
+          order.plan_name || null,
+          order.plan_duration_days || 30,
+          order.payment_method,
+          order.amount,
+          order.status,
+          order.notes || null,
+          order.receipt_url || null,
+          order.receipt_code || null,
+          order.pix_copy_paste || null,
+          order.created_at,
+          order.updated_at
+        ]
+      );
+    } catch (err: any) {
+      console.warn('[PostgreSQL] createManualOrder full insert fallback:', err.message);
+      await getPostgresPool()!.query(
+        `INSERT INTO manual_orders (id, subscriber_id, plan_id, payment_method, amount, status, notes, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [order.id, order.subscriber_id, order.plan_id, order.payment_method, order.amount, order.status, order.notes || null, order.created_at, order.updated_at]
+      );
+    }
+  }
+
+  const db = loadDatabase();
+  if (!Array.isArray(db.manual_orders)) db.manual_orders = [];
+  db.manual_orders.unshift(order);
+  saveDatabase(db);
+
+  return order;
+}
+
+export async function getManualOrders(filter?: { status?: string; subscriberId?: string }): Promise<DbManualOrder[]> {
+  if (isPostgresActive()) {
+    try {
+      let query = 'SELECT * FROM manual_orders';
+      const conditions: string[] = [];
+      const params: any[] = [];
+      let idx = 1;
+
+      if (filter?.status) {
+        conditions.push(`status = $${idx++}`);
+        params.push(filter.status);
+      }
+      if (filter?.subscriberId) {
+        conditions.push(`subscriber_id = $${idx++}`);
+        params.push(filter.subscriberId);
+      }
+
+      if (conditions.length > 0) {
+        query += ' WHERE ' + conditions.join(' AND ');
+      }
+      query += ' ORDER BY created_at DESC LIMIT 200';
+
+      const res = await getPostgresPool()!.query(query, params);
+      return res.rows.map(r => ({
+        ...r,
+        amount: parseFloat(r.amount) || 0
+      }));
+    } catch (err: any) {
+      console.warn('[PostgreSQL] getManualOrders fallback:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  let list = db.manual_orders || [];
+  if (filter?.status) {
+    list = list.filter(o => o.status === filter.status);
+  }
+  if (filter?.subscriberId) {
+    list = list.filter(o => o.subscriber_id === filter.subscriberId);
+  }
+  return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+}
+
+export async function getManualOrderById(idOrCode: string): Promise<DbManualOrder | null> {
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query(
+        'SELECT * FROM manual_orders WHERE id = $1 OR order_code = $1 LIMIT 1',
+        [idOrCode]
+      );
+      if (res.rows[0]) {
+        const r = res.rows[0];
+        return { ...r, amount: parseFloat(r.amount) || 0 };
+      }
+    } catch (err: any) {
+      console.warn('[PostgreSQL] getManualOrderById fallback:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  return (db.manual_orders || []).find(o => o.id === idOrCode || o.order_code === idOrCode) || null;
+}
+
+export async function submitOrderReceipt(
+  orderId: string,
+  receiptData: { receipt_url?: string; receipt_code?: string; notes?: string }
+): Promise<DbManualOrder | null> {
+  const now = new Date().toISOString();
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query(
+        `UPDATE manual_orders
+         SET receipt_url = COALESCE($1, receipt_url),
+             receipt_code = COALESCE($2, receipt_code),
+             notes = COALESCE($3, notes),
+             updated_at = $4
+         WHERE id = $5 OR order_code = $5
+         RETURNING *`,
+        [receiptData.receipt_url || null, receiptData.receipt_code || null, receiptData.notes || null, now, orderId]
+      );
+      if (res.rows[0]) {
+        const r = res.rows[0];
+        return { ...r, amount: parseFloat(r.amount) || 0 };
+      }
+    } catch (err: any) {
+      console.warn('[PostgreSQL] submitOrderReceipt fallback:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const order = (db.manual_orders || []).find(o => o.id === orderId || o.order_code === orderId);
+  if (!order) return null;
+
+  if (receiptData.receipt_url) order.receipt_url = receiptData.receipt_url;
+  if (receiptData.receipt_code) order.receipt_code = receiptData.receipt_code;
+  if (receiptData.notes) order.notes = receiptData.notes;
+  order.updated_at = now;
+  saveDatabase(db);
+  return order;
+}
+
+export async function approveManualOrder(
+  orderId: string,
+  adminId: string,
+  adminEmail: string
+): Promise<{ success: boolean; order?: DbManualOrder; subscriber?: DbSubscriber; message?: string }> {
+  const order = await getManualOrderById(orderId);
+  if (!order) {
+    return { success: false, message: 'Pedido não encontrado.' };
+  }
+
+  // Impede aprovações duplicadas
+  if (order.status !== 'pending') {
+    return {
+      success: false,
+      message: `Este pedido já foi ${order.status === 'approved' ? 'aprovado' : 'rejeitado'} anteriormente e não pode ser processado novamente.`
+    };
+  }
+
+  const plan = await getSubscriptionPlanById(order.plan_id);
+  const durationDays = plan?.duration_days || order.plan_duration_days || 30;
+  const now = new Date();
+
+  // Find subscriber by id or email
+  let subscriber: DbSubscriber | null = null;
+  const subscribers = await getSubscribers();
+  if (order.subscriber_id) {
+    subscriber = subscribers.find(s => s.id === order.subscriber_id) || null;
+  }
+  if (!subscriber && order.subscriber_email) {
+    subscriber = subscribers.find(s => s.email.toLowerCase() === order.subscriber_email?.toLowerCase()) || null;
+  }
+
+  // Calculate expiration date (accumulate if currently active)
+  let baseDate = now;
+  if (subscriber?.expires_at) {
+    const currentExpiry = new Date(subscriber.expires_at);
+    if (currentExpiry > now && subscriber.status === 'active') {
+      baseDate = currentExpiry;
+    }
+  }
+  const newExpiresAt = new Date(baseDate.getTime() + durationDays * 86400000).toISOString().slice(0, 10);
+
+  // Update or create subscriber
+  if (subscriber) {
+    subscriber = await updateSubscriber(subscriber.id, {
+      status: 'active',
+      plan_id: order.plan_id,
+      plan_name: plan?.name || order.plan_name || 'Plano Gato Net',
+      expires_at: newExpiresAt,
+      notes: `Aprovado por ${adminEmail} (Pedido ${order.order_code}) em ${now.toLocaleDateString('pt-BR')}`
+    });
+  } else {
+    subscriber = await createSubscriber({
+      full_name: order.subscriber_name || 'Assinante Gato Net',
+      whatsapp: order.subscriber_whatsapp || '11999999999',
+      email: order.subscriber_email || `cliente_${order.order_code.toLowerCase()}@gatonet.tv`,
+      status: 'active',
+      plan_id: order.plan_id,
+      plan_name: plan?.name || order.plan_name || 'Plano Gato Net',
+      expires_at: newExpiresAt,
+      notes: `Criado e aprovado por ${adminEmail} (Pedido ${order.order_code})`
+    });
+  }
+
+  // Update order status to approved
+  const nowIso = now.toISOString();
+  if (isPostgresActive()) {
+    try {
+      await getPostgresPool()!.query(
+        `UPDATE manual_orders
+         SET status = 'approved',
+             reviewed_by_admin_id = $1,
+             reviewed_by_admin_email = $2,
+             reviewed_at = $3,
+             updated_at = $3
+         WHERE id = $4`,
+        [adminId, adminEmail, nowIso, order.id]
+      );
+    } catch (err: any) {
+      console.warn('[PostgreSQL] approveManualOrder order update fallback:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const dbOrder = (db.manual_orders || []).find(o => o.id === order.id);
+  if (dbOrder) {
+    dbOrder.status = 'approved';
+    dbOrder.reviewed_by_admin_id = adminId;
+    dbOrder.reviewed_by_admin_email = adminEmail;
+    dbOrder.reviewed_at = nowIso;
+    dbOrder.updated_at = nowIso;
+    saveDatabase(db);
+  }
+
+  order.status = 'approved';
+  order.reviewed_by_admin_id = adminId;
+  order.reviewed_by_admin_email = adminEmail;
+  order.reviewed_at = nowIso;
+
+  await createAuditLog(
+    adminId,
+    adminEmail,
+    'APPROVE_MANUAL_PAYMENT',
+    'manual_orders',
+    order.id,
+    {
+      order_code: order.order_code,
+      amount: order.amount,
+      plan_name: plan?.name || order.plan_name,
+      subscriber_email: order.subscriber_email,
+      new_expires_at: newExpiresAt
+    },
+    null
+  );
+
+  return {
+    success: true,
+    order,
+    subscriber: subscriber || undefined,
+    message: `Pagamento de R$ ${order.amount.toFixed(2)} aprovado com sucesso! Assinatura ativada até ${newExpiresAt}.`
+  };
+}
+
+export async function rejectManualOrder(
+  orderId: string,
+  adminId: string,
+  adminEmail: string,
+  reason: string
+): Promise<{ success: boolean; order?: DbManualOrder; message?: string }> {
+  const order = await getManualOrderById(orderId);
+  if (!order) {
+    return { success: false, message: 'Pedido não encontrado.' };
+  }
+
+  if (order.status !== 'pending') {
+    return {
+      success: false,
+      message: `Este pedido já foi ${order.status === 'approved' ? 'aprovado' : 'rejeitado'} anteriormente.`
+    };
+  }
+
+  const nowIso = new Date().toISOString();
+  if (isPostgresActive()) {
+    try {
+      await getPostgresPool()!.query(
+        `UPDATE manual_orders
+         SET status = 'rejected',
+             rejection_reason = $1,
+             reviewed_by_admin_id = $2,
+             reviewed_by_admin_email = $3,
+             reviewed_at = $4,
+             updated_at = $4
+         WHERE id = $5`,
+        [reason, adminId, adminEmail, nowIso, order.id]
+      );
+    } catch (err: any) {
+      console.warn('[PostgreSQL] rejectManualOrder order update fallback:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const dbOrder = (db.manual_orders || []).find(o => o.id === order.id);
+  if (dbOrder) {
+    dbOrder.status = 'rejected';
+    dbOrder.rejection_reason = reason;
+    dbOrder.reviewed_by_admin_id = adminId;
+    dbOrder.reviewed_by_admin_email = adminEmail;
+    dbOrder.reviewed_at = nowIso;
+    dbOrder.updated_at = nowIso;
+    saveDatabase(db);
+  }
+
+  order.status = 'rejected';
+  order.rejection_reason = reason;
+  order.reviewed_by_admin_id = adminId;
+  order.reviewed_by_admin_email = adminEmail;
+  order.reviewed_at = nowIso;
+
+  await createAuditLog(
+    adminId,
+    adminEmail,
+    'REJECT_MANUAL_PAYMENT',
+    'manual_orders',
+    order.id,
+    { order_code: order.order_code, reason, subscriber_email: order.subscriber_email },
+    null
+  );
+
+  return {
+    success: true,
+    order,
+    message: 'Pedido de pagamento rejeitado com sucesso.'
+  };
+}
+
+export async function getFinancialHistory(): Promise<{
+  totalRevenue: number;
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  orders: DbManualOrder[];
+}> {
+  const allOrders = await getManualOrders();
+  const approved = allOrders.filter(o => o.status === 'approved');
+  const pending = allOrders.filter(o => o.status === 'pending');
+  const rejected = allOrders.filter(o => o.status === 'rejected');
+
+  const totalRevenue = approved.reduce((sum, o) => sum + (Number(o.amount) || 0), 0);
+
+  return {
+    totalRevenue,
+    pendingCount: pending.length,
+    approvedCount: approved.length,
+    rejectedCount: rejected.length,
+    orders: allOrders
+  };
+}

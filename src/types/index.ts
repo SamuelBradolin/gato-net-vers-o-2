@@ -26,6 +26,12 @@ export interface StreamSource {
   bitrateKbps: number;
 }
 
+export interface BackupStreamItem {
+  url: string;
+  priority: number;
+  label?: string;
+}
+
 export interface Channel {
   id: string;
   number: number;
@@ -34,7 +40,7 @@ export interface Channel {
   categoryName: string;
   logo: string;
   streamUrl: string;
-  alternativeStreams: string[];
+  alternativeStreams: (string | BackupStreamItem)[];
   resolution: '4K' | '1080p' | '720p';
   aspectRatio: '16:9' | '4:3';
   currentProgram: string;
@@ -45,6 +51,33 @@ export interface Channel {
   featured?: boolean;
   description: string;
   backupImage: string;
+  status?: 'active' | 'inactive' | 'maintenance';
+  accessPermission?: 'free' | 'restricted';
+}
+
+export interface ManualPaymentOrder {
+  id: string;
+  orderCode: string;
+  subscriberId: string;
+  subscriberName?: string;
+  subscriberEmail?: string;
+  subscriberWhatsapp?: string;
+  planId: string;
+  planName: string;
+  planDurationDays: number;
+  paymentMethod: 'pix' | 'paypal';
+  amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  notes?: string | null;
+  receiptUrl?: string | null;
+  receiptCode?: string | null;
+  pixCopyPaste?: string | null;
+  reviewedByAdminId?: string | null;
+  reviewedByAdminEmail?: string | null;
+  reviewedAt?: string | null;
+  rejectionReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface UserSubscriber {
@@ -63,12 +96,22 @@ export interface UserSubscriber {
 export interface SubscriptionPlan {
   id: string;
   name: string;
-  badge: string;
+  badge?: string;
   price: number;
   periodLabel: string;
-  durationMonths: number;
+  durationMonths?: number;
+  durationDays: number;
+  description?: string;
   features: string[];
+  maxScreens: number;
+  allowedScope?: 'all' | 'custom';
+  allowedCategoryIds?: string[];
+  allowedChannelIds?: string[];
   isPopular?: boolean;
+  isActive: boolean;
+  displayOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type AdSlotType = 'header' | 'player_side' | 'player_bottom' | 'inter_categories' | 'footer';
@@ -127,3 +170,63 @@ export interface SystemSettings {
   vpsSpecs: VpsSpecs;
   streamRelayEnabled: boolean;
 }
+
+export interface PlaybackSessionItem {
+  id: string;
+  subscriberId: string | null;
+  subscriberEmail?: string;
+  subscriberName?: string;
+  channelId: string;
+  channelName?: string;
+  deviceInfo?: string;
+  playbackToken?: string;
+  ipAddress: string | null;
+  startedAt: string;
+  lastHeartbeat: string;
+  endedAt?: string | null;
+  endedReason?: string | null;
+  isActive: boolean;
+}
+
+export interface PlaybackStatistics {
+  totalSubscribers: number;
+  activeSubscribers: number;
+  activeSessionsCount: number;
+  peakConcurrentViewers: number;
+  subscribersWithSessions: {
+    subscriberId: string;
+    subscriberName: string;
+    subscriberEmail: string;
+    planName: string;
+    maxScreens: number;
+    activeSessionsCount: number;
+    activeSessions: {
+      sessionId: string;
+      channelId: string;
+      channelName: string;
+      deviceInfo: string;
+      startedAt: string;
+      ipAddress: string | null;
+    }[];
+  }[];
+  audienceByChannel: {
+    channelId: string;
+    channelName: string;
+    categoryName: string;
+    viewersCount: number;
+  }[];
+  recentSessionsHistory: {
+    id: string;
+    subscriberEmail?: string;
+    subscriberName?: string;
+    channelName: string;
+    deviceInfo: string;
+    startedAt: string;
+    endedAt?: string | null;
+    durationSeconds: number;
+    status: 'active' | 'ended';
+    endedReason?: string | null;
+    ipAddress?: string | null;
+  }[];
+}
+

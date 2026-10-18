@@ -21,8 +21,10 @@ interface PlayerProps {
   adSideSlot?: AdSlot;
   isAccessAllowed: boolean;
   accessModeNotice?: string;
+  userEmail?: string | null;
   onOpenPlans: () => void;
   onOpenAuth: () => void;
+  onOpenSessions?: () => void;
   onSelectQuickChannel: (channelId: string) => void;
 }
 
@@ -31,8 +33,10 @@ export const Player: React.FC<PlayerProps> = ({
   adSideSlot,
   isAccessAllowed,
   accessModeNotice,
+  userEmail,
   onOpenPlans,
   onOpenAuth,
+  onOpenSessions,
   onSelectQuickChannel
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -48,6 +52,111 @@ export const Player: React.FC<PlayerProps> = ({
   const [currentStreamIndex, setCurrentStreamIndex] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [aspectRatio169, setAspectRatio169] = useState(true);
+
+  // Playback session concurrency & heartbeats state
+  const [sessionLimitReached, setSessionLimitReached] = useState(false);
+  const [sessionLimitNotice, setSessionLimitNotice] = useState('');
+  const [sessionTerminatedNotice, setSessionTerminatedNotice] = useState('');
+  const [, setCurrentSessionId] = useState<string | null>(null);
+
+  // Detect human-readable device name
+  const getDeviceName = () => {
+    const ua = navigator.userAgent;
+    if (/SmartTV|Tizen|Web0S|AppleTV|BRAVIA/i.test(ua)) return 'Smart TV Gato Net';
+    if (/Android/i.test(ua)) return 'Smartphone Android';
+    if (/iPhone|iPad/i.test(ua)) return 'Apple iOS (iPhone/iPad)';
+    if (/Windows/i.test(ua)) return 'PC Windows';
+    if (/Macintosh/i.test(ua)) return 'Mac OS';
+    if (/Linux/i.test(ua)) return 'Dispositivo Linux';
+    return 'Navegador Web';
+  };
+
+  // Playback session registration and periodic heartbeat
+  useEffect(() => {
+    if (!selectedChannel || !isAccessAllowed) {
+      setSessionLimitReached(false);
+      setSessionTerminatedNotice('');
+      return;
+    }
+
+    let activeId: string | null = null;
+    let activeToken: string | null = null;
+    let heartbeatInterval: any = null;
+
+    const startSession = async () => {
+      try {
+        const res = await fetch('/api/public/playback/start-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            channelId: selectedChannel.id,
+            userEmail,
+            deviceInfo: getDeviceName()
+          })
+        });
+
+        const data = await res.json().catch(() => null);
+
+        if (res.ok && data?.authorized) {
+          activeId = data.session?.id || null;
+          activeToken = data.playbackToken || null;
+          setCurrentSessionId(activeId);
+          setSessionLimitReached(false);
+          setSessionTerminatedNotice('');
+
+          // Start heartbeat every 15s to maintain active screen registration
+          heartbeatInterval = setInterval(async () => {
+            if (!activeId) return;
+            try {
+              const hbRes = await fetch('/api/public/playback/heartbeat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId: activeId,
+                  playbackToken: activeToken
+                })
+              });
+              if (hbRes.ok) {
+                const hbData = await hbRes.json();
+                if (hbData.terminated) {
+                  if (videoRef.current) videoRef.current.pause();
+                  setIsPlaying(false);
+                  setSessionTerminatedNotice(hbData.reason || 'Sessão encerrada pelo servidor ou em outro aparelho.');
+                  clearInterval(heartbeatInterval);
+                }
+              }
+            } catch (e) {
+              // Ignore network glitch
+            }
+          }, 15000);
+        } else if (data?.limitReached) {
+          if (videoRef.current) videoRef.current.pause();
+          setIsPlaying(false);
+          setSessionLimitReached(true);
+          setSessionLimitNotice(data.reason || 'Limite de telas simultâneas do plano atingido.');
+        }
+      } catch (err) {
+        // Fallback for offline preview mode
+      }
+    };
+
+    startSession();
+
+    return () => {
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      if (activeId) {
+        fetch('/api/public/playback/end-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: activeId,
+            userEmail,
+            reason: 'Canal alterado ou reprodutor fechado'
+          })
+        }).catch(() => {});
+      }
+    };
+  }, [selectedChannel, isAccessAllowed, userEmail]);
 
   // When selectedChannel changes, prepare the stream
   useEffect(() => {
@@ -138,9 +247,11 @@ export const Player: React.FC<PlayerProps> = ({
     if (selectedChannel.alternativeStreams && selectedChannel.alternativeStreams.length > 0) {
       const nextIndex = (currentStreamIndex + 1) % (selectedChannel.alternativeStreams.length + 1);
       setCurrentStreamIndex(nextIndex);
-      const targetUrl = nextIndex === 0
-        ? selectedChannel.streamUrl
-        : selectedChannel.alternativeStreams[nextIndex - 1];
+      let targetUrl = selectedChannel.streamUrl;
+      if (nextIndex > 0) {
+        const altItem = selectedChannel.alternativeStreams[nextIndex - 1];
+        targetUrl = typeof altItem === 'string' ? altItem : (altItem?.url || selectedChannel.streamUrl);
+      }
       videoRef.current.src = targetUrl;
     } else {
       videoRef.current.src = selectedChannel.streamUrl;
@@ -347,6 +458,65 @@ export const Player: React.FC<PlayerProps> = ({
                       Cadastrar Gratuitamente
                     </button>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* STATE 2B: SIMULTANEOUS SCREENS LIMIT REACHED OVERLAY */}
+            {selectedChannel && isAccessAllowed && sessionLimitReached && (
+              <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-6 text-center bg-black/95 backdrop-blur-md">
+                <div className="max-w-md space-y-4">
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                    <Tv className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white">Limite de Telas Simultâneas Atingido</h3>
+                  <p className="text-xs text-slate-300 leading-relaxed bg-[#090f20] p-3 rounded-xl border border-slate-800">
+                    {sessionLimitNotice || 'Você atingiu o limite de telas permitidas para reprodução simultânea no seu plano.'}
+                  </p>
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                    {onOpenSessions && (
+                      <button
+                        onClick={onOpenSessions}
+                        className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs tracking-wide transition-colors cursor-pointer shadow-lg shadow-blue-900/30 flex items-center justify-center gap-2"
+                      >
+                        <Tv className="w-4 h-4" />
+                        <span>Gerenciar Minhas Telas</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={onOpenPlans}
+                      className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-colors cursor-pointer"
+                    >
+                      Ver Outros Planos
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* STATE 2C: SESSION TERMINATED NOTICE (BY ADMIN OR OTHER DEVICE) */}
+            {selectedChannel && isAccessAllowed && !sessionLimitReached && sessionTerminatedNotice && (
+              <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-6 text-center bg-black/95 backdrop-blur-md">
+                <div className="max-w-md space-y-4">
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-red-600/20 border border-red-500/40 flex items-center justify-center text-red-400">
+                    <AlertTriangle className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white">Transmissão Interrompida</h3>
+                  <p className="text-xs text-slate-300 leading-relaxed bg-[#090f20] p-3 rounded-xl border border-slate-800">
+                    {sessionTerminatedNotice}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setSessionTerminatedNotice('');
+                      if (videoRef.current) {
+                        videoRef.current.load();
+                        videoRef.current.play().catch(() => {});
+                      }
+                    }}
+                    className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Reconectar Sinal
+                  </button>
                 </div>
               </div>
             )}

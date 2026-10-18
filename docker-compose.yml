@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # 1. Banco de Dados PostgreSQL 16 Local na VPS Virtarix
+  postgres:
+    image: postgres:16-alpine
+    container_name: gatonet_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gatonet_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-AltereEssaSenhaForte123!}
+      POSTGRES_DB: ${POSTGRES_DB:-gatonet_db}
+    ports:
+      - "127.0.0.1:5432:5432" # Restrito a localhost por segurança
+    volumes:
+      - gatonet_pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gatonet_user} -d ${POSTGRES_DB:-gatonet_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Aplicação Backend e Frontend Gato Net (Node.js 22 LTS)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gatonet_app
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-gatonet_user}:${POSTGRES_PASSWORD:-AltereEssaSenhaForte123!}@postgres:5432/${POSTGRES_DB:-gatonet_db}
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  gatonet_pgdata:
+    driver: local
