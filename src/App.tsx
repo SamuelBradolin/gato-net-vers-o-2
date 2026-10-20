@@ -6,7 +6,9 @@ import {
   AdSlot,
   SystemSettings,
   PaymentSettings,
-  UserSubscriber
+  UserSubscriber,
+  FeaturedHighlight,
+  FeaturedSettings
 } from './types';
 import {
   INITIAL_CATEGORIES,
@@ -37,6 +39,12 @@ export default function App() {
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(INITIAL_SYSTEM_SETTINGS);
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings>(INITIAL_PAYMENT_SETTINGS);
   const [subscribers, setSubscribers] = useState<UserSubscriber[]>(INITIAL_DEMO_SUBSCRIBERS);
+  const [featuredHighlights, setFeaturedHighlights] = useState<FeaturedHighlight[]>([]);
+  const [featuredSettings, setFeaturedSettings] = useState<FeaturedSettings>({
+    autoplayIntervalSeconds: 6,
+    maxActiveHighlights: 6,
+    playbackBannerEnabled: true
+  });
 
   // Selected Channel state: Starts as null so stream does not start automatically
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
@@ -85,8 +93,19 @@ export default function App() {
 
   const handleSelectQuickChannel = (channelId: string) => {
     const ch = channels.find((c) => c.id === channelId);
-    if (ch) {
-      handleSelectChannel(ch);
+    if (!ch) return;
+
+    handleSelectChannel(ch);
+
+    // Enforce platform access rules when clicking "Assistir agora" on featured highlights
+    if (systemSettings.accessMode === 'free_registered' && !currentUserEmail) {
+      setIsAuthModalOpen(true);
+    } else if (systemSettings.accessMode === 'subscription' && ch.isLocked) {
+      if (!currentUserEmail) {
+        setIsAuthModalOpen(true);
+      } else if (!userHasSubscription) {
+        setIsPlansModalOpen(true);
+      }
     }
   };
 
@@ -190,12 +209,23 @@ export default function App() {
   // Synchronize dynamic channels and settings from server/PostgreSQL
   const refreshPublicData = useCallback(async () => {
     try {
-      const [channelsRes, categoriesRes, settingsRes, plansRes] = await Promise.all([
+      const [channelsRes, categoriesRes, settingsRes, plansRes, featuredRes] = await Promise.all([
         fetch('/api/public/channels').catch(() => null),
         fetch('/api/public/categories').catch(() => null),
         fetch('/api/public/settings').catch(() => null),
-        fetch('/api/public/plans').catch(() => null)
+        fetch('/api/public/plans').catch(() => null),
+        fetch('/api/public/featured').catch(() => null)
       ]);
+
+      if (featuredRes && featuredRes.ok) {
+        const featData = await featuredRes.json();
+        if (featData && Array.isArray(featData.highlights)) {
+          setFeaturedHighlights(featData.highlights);
+        }
+        if (featData && featData.settings) {
+          setFeaturedSettings(featData.settings);
+        }
+      }
 
       if (channelsRes && channelsRes.ok) {
         const dbChannels = await channelsRes.json();
@@ -274,7 +304,14 @@ export default function App() {
             siteName: s.appearance.site_name || prev.siteName,
             tagline: s.appearance.tagline || prev.tagline,
             logoUrl: s.appearance.logo_url || prev.logoUrl,
-            accessMode: s.accessMode || prev.accessMode
+            faviconUrl: s.appearance.favicon_url || prev.faviconUrl,
+            primaryColor: s.appearance.primary_color || prev.primaryColor,
+            darkNavyColor: s.appearance.dark_navy_color || prev.darkNavyColor,
+            electricBlueColor: s.appearance.electric_blue_color || prev.electricBlueColor,
+            accessMode: s.accessMode || prev.accessMode,
+            allowPublicChannelBrowse: s.allowPublicBrowse !== undefined ? s.allowPublicBrowse : prev.allowPublicChannelBrowse,
+            maxSimultaneousStreams: s.maxSimultaneousStreams || prev.maxSimultaneousStreams,
+            streamRelayEnabled: s.streamRelayEnabled !== undefined ? s.streamRelayEnabled : prev.streamRelayEnabled
           }));
         }
         if (s.adSlots && Array.isArray(s.adSlots)) {
@@ -301,6 +338,34 @@ export default function App() {
   useEffect(() => {
     refreshPublicData();
   }, [refreshPublicData]);
+
+  // Synchronize document title, favicon, and brand colors dynamically
+  useEffect(() => {
+    if (systemSettings.siteName) {
+      document.title = `${systemSettings.siteName} — ${systemSettings.tagline || 'Plataforma de TV Ao Vivo'}`;
+    }
+
+    if (systemSettings.faviconUrl) {
+      let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'shortcut icon';
+        document.head.appendChild(link);
+      }
+      link.href = systemSettings.faviconUrl;
+    }
+
+    const root = document.documentElement;
+    if (systemSettings.primaryColor) {
+      root.style.setProperty('--color-primary-bg', systemSettings.primaryColor);
+    }
+    if (systemSettings.darkNavyColor) {
+      root.style.setProperty('--color-dark-navy', systemSettings.darkNavyColor);
+    }
+    if (systemSettings.electricBlueColor) {
+      root.style.setProperty('--color-electric-blue', systemSettings.electricBlueColor);
+    }
+  }, [systemSettings.siteName, systemSettings.tagline, systemSettings.faviconUrl, systemSettings.primaryColor, systemSettings.darkNavyColor, systemSettings.electricBlueColor]);
 
   // Keyboard navigation for Smart TV / PC
   useEffect(() => {
@@ -358,10 +423,15 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#060911] text-slate-100 flex flex-col selection:bg-blue-600 selection:text-white">
+    <div
+      className="min-h-screen text-slate-100 flex flex-col selection:bg-blue-600 selection:text-white"
+      style={{ backgroundColor: systemSettings.primaryColor || '#060911' }}
+    >
       {/* Platform Header */}
       <Header
         customLogoUrl={systemSettings.logoUrl}
+        siteName={systemSettings.siteName}
+        tagline={systemSettings.tagline}
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onOpenAdmin={() => setIsAdminMode(true)}
         onOpenPlans={() => setIsPlansModalOpen(true)}
@@ -380,13 +450,15 @@ export default function App() {
 
       {/* Main Streaming Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5">
-        {/* Large Prominent Video Player with Side Ad Banner */}
+        {/* Large Prominent Video Player with Side Ad Banner & Featured Highlights */}
         <Player
           selectedChannel={selectedChannel}
           adSideSlot={playerSideAd}
           isAccessAllowed={isAccessAllowed()}
           accessModeNotice={getAccessNotice()}
           userEmail={currentUserEmail}
+          featuredHighlights={featuredHighlights}
+          featuredSettings={featuredSettings}
           onOpenPlans={() => setIsPlansModalOpen(true)}
           onOpenAuth={() => setIsAuthModalOpen(true)}
           onOpenSessions={() => setIsSessionsModalOpen(true)}

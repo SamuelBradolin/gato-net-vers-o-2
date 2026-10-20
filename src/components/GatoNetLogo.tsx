@@ -2,24 +2,38 @@ import React from 'react';
 
 interface GatoNetLogoProps {
   customLogoUrl?: string;
+  siteName?: string;
+  tagline?: string;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
 }
 
 export const GatoNetLogo: React.FC<GatoNetLogoProps> = ({
   customLogoUrl,
+  siteName = 'Gato Net',
+  tagline = 'Televisão Ao Vivo',
   size = 'md',
   className = ''
 }) => {
   if (customLogoUrl) {
     return (
-      <img
-        src={customLogoUrl}
-        alt="Gato Net"
-        className={`object-contain ${
-          size === 'sm' ? 'h-7' : size === 'lg' ? 'h-12' : 'h-9'
-        } ${className}`}
-      />
+      <div className={`flex items-center gap-2.5 select-none ${className}`}>
+        <img
+          src={customLogoUrl}
+          alt={siteName}
+          className={`object-contain max-w-[180px] ${
+            size === 'sm' ? 'h-7' : size === 'lg' ? 'h-12' : 'h-9'
+          }`}
+          onError={(e) => {
+            // If custom logo fails to load, gracefully fallback to default SVG
+            (e.target as HTMLElement).style.display = 'none';
+          }}
+        />
+        {/* If user provided a compact logo icon, optionally show the name next to it */}
+        <span className="hidden sm:inline font-bold text-white text-sm tracking-tight truncate max-w-[140px]">
+          {siteName}
+        </span>
+      </div>
     );
   }
 
@@ -88,15 +102,21 @@ export const GatoNetLogo: React.FC<GatoNetLogoProps> = ({
       {/* Brand Wordmark */}
       <div className="flex flex-col leading-none">
         <div className="flex items-center gap-1.5">
-          <span className={`font-extrabold tracking-tight text-white uppercase ${textClass}`}>
-            GATO<span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-sky-300">NET</span>
-          </span>
+          {siteName.toLowerCase().includes('gato net') ? (
+            <span className={`font-extrabold tracking-tight text-white uppercase ${textClass}`}>
+              GATO<span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-sky-300">NET</span>
+            </span>
+          ) : (
+            <span className={`font-extrabold tracking-tight text-white uppercase ${textClass} truncate max-w-[200px]`}>
+              {siteName}
+            </span>
+          )}
           <span className="text-[10px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded bg-blue-950/70 border border-blue-500/30 text-blue-300">
             TV
           </span>
         </div>
-        <span className="text-[10px] text-slate-400 font-medium tracking-wide">
-          Televisão Ao Vivo
+        <span className="text-[10px] text-slate-400 font-medium tracking-wide truncate max-w-[220px]">
+          {tagline}
         </span>
       </div>
     </div>

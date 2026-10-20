@@ -16,7 +16,11 @@ import {
   createManualOrder,
   getManualOrderById,
   submitOrderReceipt,
-  getPaymentConfigs
+  getPaymentConfigs,
+  getFeaturedHighlights,
+  getFeaturedSettings,
+  getEligiblePrerollCampaign,
+  recordPrerollEvent
 } from '../db/repository.js';
 import { hashPassword, verifyPassword } from '../auth/argon2.js';
 
@@ -48,15 +52,74 @@ router.get('/public/settings', async (_req: Request, res: Response) => {
     const appearance = await getAppearanceConfigs();
     const accessModes = await getAccessModes();
     const adSlots = await getAdSlots();
+    const featuredSettings = await getFeaturedSettings();
 
     res.json({
       appearance,
       accessMode: accessModes.current_mode,
       allowPublicBrowse: accessModes.allow_public_browse,
-      adSlots: adSlots.filter(a => a.is_enabled)
+      maxSimultaneousStreams: accessModes.max_simultaneous_streams,
+      streamRelayEnabled: accessModes.stream_relay_enabled,
+      adSlots: adSlots.filter(a => a.is_enabled),
+      featuredSettings
     });
   } catch (err: any) {
     res.status(500).json({ error: 'Erro ao carregar configurações públicas' });
+  }
+});
+
+// 3.1. Public featured programming highlights
+router.get('/public/featured', async (_req: Request, res: Response) => {
+  try {
+    const [allHighlights, settings, channels] = await Promise.all([
+      getFeaturedHighlights(false),
+      getFeaturedSettings(),
+      getChannels(true)
+    ]);
+
+    const now = new Date().getTime();
+    const channelsMap = new Map(channels.map(c => [c.id, c]));
+
+    // Filter by dates if present and active
+    const activeHighlights = allHighlights
+      .filter(item => {
+        if (!item.is_active) return false;
+        if (item.start_date && new Date(item.start_date).getTime() > now) return false;
+        if (item.end_date && new Date(item.end_date).getTime() < now) return false;
+        return true;
+      })
+      .slice(0, settings.max_active_highlights || 6)
+      .map(item => {
+        const channel = channelsMap.get(item.target_channel_id);
+        return {
+          id: item.id,
+          title: item.title,
+          description: item.description,
+          imageUrl: item.image_url,
+          targetChannelId: item.target_channel_id,
+          targetChannelName: channel?.name || 'Canal Gato Net',
+          targetChannelNumber: channel?.number || 1,
+          buttonText: item.button_text || 'Assistir agora',
+          timeLabel: item.time_label,
+          startDate: item.start_date,
+          endDate: item.end_date,
+          placement: item.placement || 'both',
+          displayOrder: item.display_order,
+          isActive: item.is_active,
+          isDemo: item.is_demo
+        };
+      });
+
+    res.json({
+      highlights: activeHighlights,
+      settings: {
+        autoplayIntervalSeconds: settings.autoplay_interval_seconds || 6,
+        maxActiveHighlights: settings.max_active_highlights || 6,
+        playbackBannerEnabled: settings.playback_banner_enabled !== false
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao carregar destaques da programação' });
   }
 });
 
@@ -346,6 +409,106 @@ router.get('/public/orders/:id', async (req: Request, res: Response) => {
     res.json({ success: true, order });
   } catch (err: any) {
     res.status(500).json({ error: 'Erro ao consultar status do pedido' });
+  }
+});
+
+// 15. Check eligible pre-roll ad with strict playback access verification
+router.post('/public/preroll/eligible', async (req: Request, res: Response) => {
+  try {
+    const { channelId, userEmail, visitorId } = req.body;
+    if (!channelId) {
+      res.status(400).json({ error: 'channelId é obrigatório' });
+      return;
+    }
+
+    // A. Verify access authorization first (reusing existing auth/modes)
+    const accessCheck = await verifyPlaybackAccess(channelId, userEmail);
+    if (!accessCheck.authorized) {
+      res.json({
+        authorized: false,
+        mode: accessCheck.mode,
+        reason: accessCheck.reason,
+        eligible: false,
+        ad: null
+      });
+      return;
+    }
+
+    // B. Check if there is an active eligible pre-roll ad for this channel and visitor/user
+    const ad = await getEligiblePrerollCampaign({
+      channelId,
+      userEmail,
+      visitorId
+    });
+
+    if (!ad) {
+      res.json({
+        authorized: true,
+        eligible: false,
+        ad: null
+      });
+      return;
+    }
+
+    res.json({
+      authorized: true,
+      eligible: true,
+      ad: {
+        id: ad.id,
+        sponsorName: ad.sponsor_name,
+        title: ad.title,
+        videoUrl: ad.video_url,
+        targetUrl: ad.target_url,
+        skipEnabled: ad.skip_enabled,
+        skipOffsetSeconds: ad.skip_offset_seconds,
+        isDemo: ad.is_demo
+      }
+    });
+  } catch (err: any) {
+    console.error('[Preroll Eligible Error]', err);
+    res.status(500).json({ error: 'Erro ao verificar publicidade pré-roll' });
+  }
+});
+
+// 16. Record real pre-roll ad events (impression, completion, skip, click)
+router.post('/public/preroll/event', async (req: Request, res: Response) => {
+  try {
+    const { campaignId, eventType, channelId, userEmail, visitorId } = req.body;
+    if (!campaignId || !eventType) {
+      res.status(400).json({ error: 'campaignId e eventType são obrigatórios' });
+      return;
+    }
+
+    const validEvents = ['impression', 'completion', 'skip', 'click'];
+    if (!validEvents.includes(eventType)) {
+      res.status(400).json({ error: 'Tipo de evento inválido' });
+      return;
+    }
+
+    const ipAddress = req.ip || req.headers['x-forwarded-for']?.toString() || null;
+    const userAgent = req.headers['user-agent'] || null;
+
+    let subscriberId: string | null = null;
+    if (userEmail) {
+      const subs = await getSubscribers();
+      const sub = subs.find(s => s.email.toLowerCase() === String(userEmail).toLowerCase().trim());
+      if (sub) subscriberId = sub.id;
+    }
+
+    await recordPrerollEvent({
+      campaign_id: campaignId,
+      event_type: eventType,
+      channel_id: channelId || null,
+      subscriber_id: subscriberId,
+      visitor_id: visitorId || null,
+      ip_address: ipAddress,
+      user_agent: userAgent
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Preroll Event Error]', err);
+    res.status(500).json({ error: 'Erro ao registrar evento de publicidade' });
   }
 });
 

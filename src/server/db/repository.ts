@@ -14,7 +14,11 @@ import {
   DbAccessModes,
   DbPlaybackSession,
   DbManualOrder,
-  PasswordResetToken
+  PasswordResetToken,
+  DbFeaturedHighlight,
+  DbFeaturedSettings,
+  DbPrerollCampaign,
+  DbPrerollEvent
 } from './schema.js';
 import { loadDatabase, saveDatabase } from './fileStorage.js';
 import { getPostgresPool, isPostgresActive } from './postgres.js';
@@ -2119,4 +2123,639 @@ export async function getFinancialHistory(): Promise<{
     rejectedCount: rejected.length,
     orders: allOrders
   };
+}
+
+// ==========================================
+// 15. FEATURED PROGRAMMING HIGHLIGHTS (DESTAQUES DA PROGRAMAÇÃO)
+// ==========================================
+export async function getFeaturedSettings(): Promise<DbFeaturedSettings> {
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query('SELECT * FROM featured_settings WHERE id = $1 LIMIT 1', ['primary']);
+      if (res.rows.length > 0) {
+        return res.rows[0];
+      }
+    } catch (err: any) {
+      console.warn('[Featured] Failed to query PostgreSQL featured_settings, falling back to storage:', err.message);
+    }
+  }
+  const db = loadDatabase();
+  return db.featured_settings || {
+    id: 'primary',
+    autoplay_interval_seconds: 6,
+    max_active_highlights: 6,
+    playback_banner_enabled: true,
+    updated_at: new Date().toISOString()
+  };
+}
+
+export async function updateFeaturedSettings(updates: Partial<DbFeaturedSettings>): Promise<DbFeaturedSettings> {
+  const now = new Date().toISOString();
+  if (isPostgresActive()) {
+    try {
+      const fields: string[] = [];
+      const values: any[] = [];
+      let idx = 1;
+
+      for (const [key, val] of Object.entries(updates)) {
+        if (key === 'id') continue;
+        fields.push(`${key} = $${idx}`);
+        values.push(val);
+        idx++;
+      }
+      fields.push(`updated_at = $${idx}`);
+      values.push(now);
+
+      const query = `UPDATE featured_settings SET ${fields.join(', ')} WHERE id = 'primary' RETURNING *`;
+      const res = await getPostgresPool()!.query(query, values);
+      if (res.rows.length > 0) return res.rows[0];
+    } catch (err: any) {
+      console.warn('[Featured] Failed to update PostgreSQL featured_settings, falling back to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  db.featured_settings = {
+    ...(db.featured_settings || {
+      id: 'primary',
+      autoplay_interval_seconds: 6,
+      max_active_highlights: 6,
+      playback_banner_enabled: true,
+      updated_at: now
+    }),
+    ...updates,
+    updated_at: now
+  };
+  saveDatabase(db);
+  return db.featured_settings;
+}
+
+export async function getFeaturedHighlights(includeInactive = false): Promise<DbFeaturedHighlight[]> {
+  if (isPostgresActive()) {
+    try {
+      const query = includeInactive
+        ? 'SELECT * FROM featured_highlights ORDER BY display_order ASC, created_at ASC'
+        : 'SELECT * FROM featured_highlights WHERE is_active = true ORDER BY display_order ASC, created_at ASC';
+      const res = await getPostgresPool()!.query(query);
+      return res.rows;
+    } catch (err: any) {
+      console.warn('[Featured] Failed to query PostgreSQL featured_highlights, falling back to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const list = db.featured_highlights || [];
+  const filtered = includeInactive ? list : list.filter(item => item.is_active);
+  return filtered.sort((a, b) => a.display_order - b.display_order);
+}
+
+export async function getFeaturedHighlightById(id: string): Promise<DbFeaturedHighlight | null> {
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query('SELECT * FROM featured_highlights WHERE id = $1 LIMIT 1', [id]);
+      return res.rows[0] || null;
+    } catch (err: any) {
+      console.warn('[Featured] Error fetching highlight by id:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  return (db.featured_highlights || []).find(f => f.id === id) || null;
+}
+
+export async function createFeaturedHighlight(
+  data: Omit<DbFeaturedHighlight, 'created_at' | 'updated_at'>
+): Promise<DbFeaturedHighlight> {
+  const now = new Date().toISOString();
+  const highlight: DbFeaturedHighlight = {
+    ...data,
+    created_at: now,
+    updated_at: now
+  };
+
+  if (isPostgresActive()) {
+    try {
+      const query = `
+        INSERT INTO featured_highlights (
+          id, title, description, image_url, target_channel_id, button_text,
+          time_label, start_date, end_date, placement, display_order, is_active, is_demo,
+          created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        RETURNING *
+      `;
+      const values = [
+        highlight.id,
+        highlight.title,
+        highlight.description,
+        highlight.image_url,
+        highlight.target_channel_id,
+        highlight.button_text,
+        highlight.time_label,
+        highlight.start_date,
+        highlight.end_date,
+        highlight.placement,
+        highlight.display_order,
+        highlight.is_active,
+        highlight.is_demo,
+        highlight.created_at,
+        highlight.updated_at
+      ];
+      const res = await getPostgresPool()!.query(query, values);
+      return res.rows[0];
+    } catch (err: any) {
+      console.warn('[Featured] Failed to insert in PostgreSQL, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.featured_highlights) db.featured_highlights = [];
+  db.featured_highlights.push(highlight);
+  saveDatabase(db);
+  return highlight;
+}
+
+export async function updateFeaturedHighlight(
+  id: string,
+  updates: Partial<DbFeaturedHighlight>
+): Promise<DbFeaturedHighlight | null> {
+  const now = new Date().toISOString();
+
+  if (isPostgresActive()) {
+    try {
+      const fields: string[] = [];
+      const values: any[] = [];
+      let idx = 1;
+
+      for (const [key, val] of Object.entries(updates)) {
+        if (key === 'id' || key === 'created_at') continue;
+        fields.push(`${key} = $${idx}`);
+        values.push(val);
+        idx++;
+      }
+      fields.push(`updated_at = $${idx}`);
+      values.push(now);
+      idx++;
+
+      values.push(id);
+      const query = `UPDATE featured_highlights SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`;
+      const res = await getPostgresPool()!.query(query, values);
+      if (res.rows.length > 0) return res.rows[0];
+    } catch (err: any) {
+      console.warn('[Featured] Failed to update PostgreSQL highlight, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.featured_highlights) db.featured_highlights = [];
+  const idx = db.featured_highlights.findIndex(f => f.id === id);
+  if (idx === -1) return null;
+
+  db.featured_highlights[idx] = {
+    ...db.featured_highlights[idx],
+    ...updates,
+    updated_at: now
+  };
+  saveDatabase(db);
+  return db.featured_highlights[idx];
+}
+
+export async function deleteFeaturedHighlight(id: string): Promise<boolean> {
+  if (isPostgresActive()) {
+    try {
+      await getPostgresPool()!.query('DELETE FROM featured_highlights WHERE id = $1', [id]);
+      return true;
+    } catch (err: any) {
+      console.warn('[Featured] Failed to delete in PostgreSQL, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.featured_highlights) return false;
+  const initialLen = db.featured_highlights.length;
+  db.featured_highlights = db.featured_highlights.filter(f => f.id !== id);
+  saveDatabase(db);
+  return db.featured_highlights.length < initialLen;
+}
+
+export async function reorderFeaturedHighlights(orderedIds: string[]): Promise<boolean> {
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      for (let i = 0; i < orderedIds.length; i++) {
+        await pool.query('UPDATE featured_highlights SET display_order = $1 WHERE id = $2', [i + 1, orderedIds[i]]);
+      }
+      return true;
+    } catch (err: any) {
+      console.warn('[Featured] Failed to reorder in PostgreSQL, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.featured_highlights) return false;
+  orderedIds.forEach((id, idx) => {
+    const item = db.featured_highlights.find(f => f.id === id);
+    if (item) {
+      item.display_order = idx + 1;
+    }
+  });
+  db.featured_highlights.sort((a, b) => a.display_order - b.display_order);
+  saveDatabase(db);
+  return true;
+}
+
+// ==========================================
+// 19. PRE-ROLL VIDEO ADVERTISING
+// ==========================================
+
+export async function getPrerollCampaigns(onlyActive = false): Promise<DbPrerollCampaign[]> {
+  if (isPostgresActive()) {
+    try {
+      const query = onlyActive
+        ? 'SELECT * FROM preroll_campaigns WHERE is_active = true ORDER BY priority DESC, created_at DESC'
+        : 'SELECT * FROM preroll_campaigns ORDER BY priority DESC, created_at DESC';
+      const res = await getPostgresPool()!.query(query);
+      return res.rows.map(row => ({
+        ...row,
+        target_channel_ids: Array.isArray(row.target_channel_ids) ? row.target_channel_ids : (typeof row.target_channel_ids === 'string' ? JSON.parse(row.target_channel_ids) : []),
+        target_category_ids: Array.isArray(row.target_category_ids) ? row.target_category_ids : (typeof row.target_category_ids === 'string' ? JSON.parse(row.target_category_ids) : []),
+        exempt_plan_ids: Array.isArray(row.exempt_plan_ids) ? row.exempt_plan_ids : (typeof row.exempt_plan_ids === 'string' ? JSON.parse(row.exempt_plan_ids) : [])
+      }));
+    } catch (err: any) {
+      console.warn('[Preroll] Failed to fetch from PostgreSQL, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const campaigns = db.preroll_campaigns || [];
+  const list = onlyActive ? campaigns.filter(c => c.is_active) : campaigns;
+  return [...list].sort((a, b) => (b.priority || 0) - (a.priority || 0));
+}
+
+export async function getPrerollCampaignById(id: string): Promise<DbPrerollCampaign | null> {
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query('SELECT * FROM preroll_campaigns WHERE id = $1 LIMIT 1', [id]);
+      if (res.rows[0]) {
+        const row = res.rows[0];
+        return {
+          ...row,
+          target_channel_ids: Array.isArray(row.target_channel_ids) ? row.target_channel_ids : (typeof row.target_channel_ids === 'string' ? JSON.parse(row.target_channel_ids) : []),
+          target_category_ids: Array.isArray(row.target_category_ids) ? row.target_category_ids : (typeof row.target_category_ids === 'string' ? JSON.parse(row.target_category_ids) : []),
+          exempt_plan_ids: Array.isArray(row.exempt_plan_ids) ? row.exempt_plan_ids : (typeof row.exempt_plan_ids === 'string' ? JSON.parse(row.exempt_plan_ids) : [])
+        };
+      }
+      return null;
+    } catch (err: any) {
+      console.warn('[Preroll] Failed to fetch campaign by id from PostgreSQL:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  return (db.preroll_campaigns || []).find(c => c.id === id) || null;
+}
+
+export async function createPrerollCampaign(data: Partial<DbPrerollCampaign>): Promise<DbPrerollCampaign> {
+  const id = data.id || `camp_${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+
+  const campaign: DbPrerollCampaign = {
+    id,
+    sponsor_name: data.sponsor_name?.trim() || 'Patrocinador Oficial',
+    title: data.title?.trim() || 'Campanha de Vídeo Pré-roll',
+    video_url: data.video_url || '',
+    target_url: data.target_url?.trim() || null,
+    target_type: data.target_type || 'all',
+    target_channel_ids: data.target_channel_ids || [],
+    target_category_ids: data.target_category_ids || [],
+    start_date: data.start_date || null,
+    end_date: data.end_date || null,
+    is_continuous: data.is_continuous ?? true,
+    priority: data.priority ?? 5,
+    frequency_cap_minutes: data.frequency_cap_minutes ?? 15,
+    skip_enabled: data.skip_enabled ?? true,
+    skip_offset_seconds: data.skip_offset_seconds ?? 5,
+    exempt_plan_ids: data.exempt_plan_ids || [],
+    is_active: data.is_active ?? true,
+    is_demo: data.is_demo ?? false,
+    impressions_count: 0,
+    completions_count: 0,
+    skips_count: 0,
+    clicks_count: 0,
+    created_at: now,
+    updated_at: now
+  };
+
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const res = await pool.query(
+        `INSERT INTO preroll_campaigns (
+          id, sponsor_name, title, video_url, target_url, target_type,
+          target_channel_ids, target_category_ids, start_date, end_date,
+          is_continuous, priority, frequency_cap_minutes, skip_enabled,
+          skip_offset_seconds, exempt_plan_ids, is_active, is_demo,
+          impressions_count, completions_count, skips_count, clicks_count,
+          created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6,
+          $7, $8, $9, $10,
+          $11, $12, $13, $14,
+          $15, $16, $17, $18,
+          0, 0, 0, 0,
+          $19, $20
+        ) RETURNING *`,
+        [
+          campaign.id,
+          campaign.sponsor_name,
+          campaign.title,
+          campaign.video_url,
+          campaign.target_url,
+          campaign.target_type,
+          JSON.stringify(campaign.target_channel_ids),
+          JSON.stringify(campaign.target_category_ids),
+          campaign.start_date,
+          campaign.end_date,
+          campaign.is_continuous,
+          campaign.priority,
+          campaign.frequency_cap_minutes,
+          campaign.skip_enabled,
+          campaign.skip_offset_seconds,
+          JSON.stringify(campaign.exempt_plan_ids),
+          campaign.is_active,
+          campaign.is_demo,
+          campaign.created_at,
+          campaign.updated_at
+        ]
+      );
+      if (res.rows[0]) return campaign;
+    } catch (err: any) {
+      console.warn('[Preroll] Failed to insert campaign into PostgreSQL:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.preroll_campaigns) db.preroll_campaigns = [];
+  db.preroll_campaigns.unshift(campaign);
+  saveDatabase(db);
+  return campaign;
+}
+
+export async function updatePrerollCampaign(id: string, updates: Partial<DbPrerollCampaign>): Promise<DbPrerollCampaign | null> {
+  const now = new Date().toISOString();
+
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const fields: string[] = [];
+      const values: any[] = [];
+      let idx = 1;
+
+      for (const [key, val] of Object.entries(updates)) {
+        if (key === 'id' || key === 'created_at') continue;
+        if (key === 'target_channel_ids' || key === 'target_category_ids' || key === 'exempt_plan_ids') {
+          fields.push(`${key} = $${idx}`);
+          values.push(JSON.stringify(val));
+        } else {
+          fields.push(`${key} = $${idx}`);
+          values.push(val);
+        }
+        idx++;
+      }
+
+      fields.push(`updated_at = $${idx}`);
+      values.push(now);
+      idx++;
+
+      values.push(id);
+      const query = `UPDATE preroll_campaigns SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`;
+      const res = await pool.query(query, values);
+      if (res.rows[0]) {
+        const row = res.rows[0];
+        return {
+          ...row,
+          target_channel_ids: Array.isArray(row.target_channel_ids) ? row.target_channel_ids : (typeof row.target_channel_ids === 'string' ? JSON.parse(row.target_channel_ids) : []),
+          target_category_ids: Array.isArray(row.target_category_ids) ? row.target_category_ids : (typeof row.target_category_ids === 'string' ? JSON.parse(row.target_category_ids) : []),
+          exempt_plan_ids: Array.isArray(row.exempt_plan_ids) ? row.exempt_plan_ids : (typeof row.exempt_plan_ids === 'string' ? JSON.parse(row.exempt_plan_ids) : [])
+        };
+      }
+    } catch (err: any) {
+      console.warn('[Preroll] Failed to update in PostgreSQL:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.preroll_campaigns) return null;
+  const index = db.preroll_campaigns.findIndex(c => c.id === id);
+  if (index === -1) return null;
+
+  db.preroll_campaigns[index] = {
+    ...db.preroll_campaigns[index],
+    ...updates,
+    updated_at: now
+  };
+  saveDatabase(db);
+  return db.preroll_campaigns[index];
+}
+
+export async function deletePrerollCampaign(id: string): Promise<boolean> {
+  if (isPostgresActive()) {
+    try {
+      await getPostgresPool()!.query('DELETE FROM preroll_campaigns WHERE id = $1', [id]);
+      return true;
+    } catch (err: any) {
+      console.warn('[Preroll] Failed to delete campaign in PostgreSQL:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.preroll_campaigns) return false;
+  const initialCount = db.preroll_campaigns.length;
+  db.preroll_campaigns = db.preroll_campaigns.filter(c => c.id !== id);
+  saveDatabase(db);
+  return db.preroll_campaigns.length < initialCount;
+}
+
+export async function resetPrerollStats(campaignId: string): Promise<boolean> {
+  if (isPostgresActive()) {
+    try {
+      await getPostgresPool()!.query(
+        `UPDATE preroll_campaigns
+         SET impressions_count = 0, completions_count = 0, skips_count = 0, clicks_count = 0, updated_at = NOW()
+         WHERE id = $1`,
+        [campaignId]
+      );
+      await getPostgresPool()!.query('DELETE FROM preroll_events WHERE campaign_id = $1', [campaignId]);
+      return true;
+    } catch (err: any) {
+      console.warn('[Preroll] Failed to reset stats in PostgreSQL:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.preroll_campaigns) return false;
+  const c = db.preroll_campaigns.find(item => item.id === campaignId);
+  if (!c) return false;
+  c.impressions_count = 0;
+  c.completions_count = 0;
+  c.skips_count = 0;
+  c.clicks_count = 0;
+  c.updated_at = new Date().toISOString();
+  if (db.preroll_events) {
+    db.preroll_events = db.preroll_events.filter(e => e.campaign_id !== campaignId);
+  }
+  saveDatabase(db);
+  return true;
+}
+
+export async function recordPrerollEvent(event: {
+  campaign_id: string;
+  event_type: 'impression' | 'completion' | 'skip' | 'click';
+  channel_id?: string | null;
+  subscriber_id?: string | null;
+  visitor_id?: string | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
+}): Promise<void> {
+  const id = `pevt_${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      // 1. Insert event
+      await pool.query(
+        `INSERT INTO preroll_events (id, campaign_id, event_type, channel_id, subscriber_id, visitor_id, ip_address, user_agent, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          id,
+          event.campaign_id,
+          event.event_type,
+          event.channel_id || null,
+          event.subscriber_id || null,
+          event.visitor_id || null,
+          event.ip_address || null,
+          event.user_agent || null,
+          now
+        ]
+      );
+
+      // 2. Increment corresponding counter
+      let col = 'impressions_count';
+      if (event.event_type === 'completion') col = 'completions_count';
+      else if (event.event_type === 'skip') col = 'skips_count';
+      else if (event.event_type === 'click') col = 'clicks_count';
+
+      await pool.query(
+        `UPDATE preroll_campaigns SET ${col} = ${col} + 1, updated_at = NOW() WHERE id = $1`,
+        [event.campaign_id]
+      );
+      return;
+    } catch (err: any) {
+      console.warn('[Preroll] Failed to record event in PostgreSQL:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.preroll_events) db.preroll_events = [];
+  db.preroll_events.push({
+    id,
+    campaign_id: event.campaign_id,
+    event_type: event.event_type,
+    channel_id: event.channel_id || null,
+    subscriber_id: event.subscriber_id || null,
+    visitor_id: event.visitor_id || null,
+    ip_address: event.ip_address || null,
+    user_agent: event.user_agent || null,
+    created_at: now
+  });
+
+  if (db.preroll_campaigns) {
+    const c = db.preroll_campaigns.find(item => item.id === event.campaign_id);
+    if (c) {
+      if (event.event_type === 'impression') c.impressions_count = (c.impressions_count || 0) + 1;
+      else if (event.event_type === 'completion') c.completions_count = (c.completions_count || 0) + 1;
+      else if (event.event_type === 'skip') c.skips_count = (c.skips_count || 0) + 1;
+      else if (event.event_type === 'click') c.clicks_count = (c.clicks_count || 0) + 1;
+      c.updated_at = now;
+    }
+  }
+  saveDatabase(db);
+}
+
+export async function getEligiblePrerollCampaign(params: {
+  channelId: string;
+  userEmail?: string | null;
+  visitorId?: string | null;
+}): Promise<DbPrerollCampaign | null> {
+  const { channelId, userEmail, visitorId } = params;
+
+  // 1. Fetch channel info to check category targeting
+  const channel = await getChannelById(channelId);
+  if (!channel) return null;
+
+  // 2. Fetch subscriber info if user logged in
+  let subscriber: DbSubscriber | null = null;
+  if (userEmail) {
+    const subs = await getSubscribers();
+    subscriber = subs.find(s => s.email.toLowerCase() === userEmail.toLowerCase().trim()) || null;
+  }
+
+  // 3. Fetch active campaigns
+  const campaigns = await getPrerollCampaigns(true);
+  if (campaigns.length === 0) return null;
+
+  const nowTime = Date.now();
+  const db = loadDatabase();
+  const recentEvents = db.preroll_events || [];
+
+  const eligibleList = campaigns.filter(campaign => {
+    // A. Verify video URL exists
+    if (!campaign.video_url || !campaign.video_url.trim()) return false;
+
+    // B. Check date validity if not continuous
+    if (!campaign.is_continuous) {
+      if (campaign.start_date && new Date(campaign.start_date).getTime() > nowTime) return false;
+      if (campaign.end_date && new Date(campaign.end_date).getTime() < nowTime) return false;
+    }
+
+    // C. Check plan exemption
+    // If the subscriber has an active plan that is marked as exempt from ads, don't show this ad
+    if (subscriber && subscriber.status === 'active' && subscriber.plan_id) {
+      const exemptPlans = campaign.exempt_plan_ids || [];
+      if (exemptPlans.includes(subscriber.plan_id)) {
+        return false;
+      }
+    }
+
+    // D. Check channel / category targeting
+    if (campaign.target_type === 'channels') {
+      const channelIds = campaign.target_channel_ids || [];
+      if (!channelIds.includes(channelId)) return false;
+    } else if (campaign.target_type === 'categories') {
+      const categoryIds = campaign.target_category_ids || [];
+      if (!categoryIds.includes(channel.category_id)) return false;
+    }
+
+    // E. Check frequency capping
+    if (campaign.frequency_cap_minutes > 0 && (visitorId || subscriber?.id)) {
+      const cutoffTime = nowTime - campaign.frequency_cap_minutes * 60 * 1000;
+      const recentImpression = recentEvents.find(e =>
+        e.campaign_id === campaign.id &&
+        e.event_type === 'impression' &&
+        ((visitorId && e.visitor_id === visitorId) || (subscriber && e.subscriber_id === subscriber.id)) &&
+        new Date(e.created_at).getTime() >= cutoffTime
+      );
+      if (recentImpression) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  if (eligibleList.length === 0) return null;
+
+  // 4. Return top priority campaign (if tied, randomized or first)
+  eligibleList.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+  return eligibleList[0];
 }

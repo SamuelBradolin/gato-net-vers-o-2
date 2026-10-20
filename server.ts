@@ -8,14 +8,24 @@ import publicRoutes from './src/server/routes/publicRoutes.js';
 import { testPostgresConnection, runPostgresMigrations, isPostgresActive } from './src/server/db/postgres.js';
 import { countAdmins } from './src/server/db/repository.js';
 
+import fs from 'fs';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-app.use(express.json());
+app.use(express.json({ limit: '75mb' }));
+app.use(express.urlencoded({ extended: true, limit: '75mb' }));
 app.use(cookieParser());
+
+// Static uploads directory with persistence
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsDir));
 
 // Trust first proxy for accurate IP in logs and rate limiting behind Nginx/Cloud Run
 app.set('trust proxy', 1);

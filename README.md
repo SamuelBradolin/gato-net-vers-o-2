@@ -14,16 +14,23 @@ Plataforma profissional de transmissão de televisão desenvolvida para computad
 
 ---
 
-## 2. Infraestrutura Planejada (VPS Virtarix)
+## 2. Infraestrutura e Publicação na VPS Virtarix
 
-- **Sistema Operacional:** Ubuntu 24.04 LTS
-- **Processador:** 3 vCPU
-- **Memória RAM:** 6 GB DDR4 ECC
-- **Armazenamento:** 50 GB NVMe SSD
-- **Porta de Rede:** 200 Mbps Dedicados
-- **Banco de Dados (Etapa 2):** PostgreSQL 16 local na própria VPS
-- **Web Server & Reverse Proxy:** Nginx com SSL Let's Encrypt
-- **Process Manager:** Node.js com PM2 ou Docker Compose
+- **Sistema Operacional:** Ubuntu 24.04 LTS (Noble Numbat)
+- **Recursos da Máquina:** 3 vCPU | 6 GB RAM DDR4 ECC | 50 GB NVMe SSD | 200 Mbps Dedicados
+- **Containers Docker:**
+  - `gatonet_app`: Aplicação Node.js 22 LTS (Backend Express + Frontend React 19 / Vite)
+  - `gatonet_postgres`: PostgreSQL 16 Alpine com configuração customizada para NVMe e 6GB RAM
+- **Volumes Persistentes (Não apagados ao atualizar):**
+  - `gatonet_pgdata`: Base de dados e transações do PostgreSQL 16
+  - `gatonet_uploads`: Armazenamento de logotipos, favicons e arquivos enviados
+  - `gatonet_data`: Metadados e estado do sistema
+- **Scripts de Operação (`/scripts`):**
+  - `scripts/deploy.sh`: Inicialização completa e build com Docker Compose
+  - `scripts/create-admin.sh`: Criação interativa de Superadministrador via CLI
+  - `scripts/backup.sh`: Backup com dump comprimido e rotação de 7 dias
+  - `scripts/restore.sh`: Restauração segura de banco de dados e arquivos
+- **Documentação Completa de Implantação:** Consulte [DEPLOY.md](./DEPLOY.md) para o passo a passo de Nginx, SSL, Crontab e troubleshooting.
 
 ---
 
@@ -49,7 +56,7 @@ Plataforma profissional de transmissão de televisão desenvolvida para computad
 5. **Rodapé Público Limpo:**
    - Remoção de dados técnicos da VPS Virtarix (CPU, RAM, 50GB NVMe, 200 Mbps) do rodapé público, mantendo-os devidamente organizados dentro do Painel Administrativo.
 
-6. **Painel Administrativo Completo (12 Módulos):**
+6. **Painel Administrativo Completo (13 Módulos):**
    - `1. Dashboard`
    - `2. Gerenciamento de Canais`
    - `3. Categorias`
@@ -62,6 +69,12 @@ Plataforma profissional de transmissão de televisão desenvolvida para computad
    - `10. Estatísticas e Audiência`
    - `11. Configurações Gerais (Modos 1, 2 e 3)`
    - `12. Segurança e Backups da VPS Virtarix`
+   - `13. Destaques da Programação (Carrossel no Player Vazio e Faixa Superior)`
+
+7. **Sistema de Destaques da Programação:**
+   - Carrossel cinematográfico no player vazio com auto-rotação configurável, controles manuais, suporte a Smart TV e redução de movimento.
+   - Faixa superior (ticker) durante a reprodução com troca imediata de canal sem interromper o stream de fundo durante a rotação.
+   - Respeito integral às regras de autenticação, autorização, assinaturas VIP e limites de telas simultâneas do canal vinculado.
 
 ---
 

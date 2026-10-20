@@ -226,3 +226,68 @@ export interface PasswordResetToken {
   created_at: string;
 }
 
+export interface DbFeaturedHighlight {
+  id: string;
+  title: string;
+  description: string | null;
+  image_url: string;
+  target_channel_id: string;
+  button_text: string;
+  time_label: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  placement: 'empty_player' | 'player_banner' | 'both';
+  display_order: number;
+  is_active: boolean;
+  is_demo: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbFeaturedSettings {
+  id: string;
+  autoplay_interval_seconds: number;
+  max_active_highlights: number;
+  playback_banner_enabled: boolean;
+  updated_at: string;
+}
+
+export interface DbPrerollCampaign {
+  id: string;
+  sponsor_name: string;
+  title: string;
+  video_url: string;
+  target_url: string | null;
+  target_type: 'all' | 'channels' | 'categories';
+  target_channel_ids: string[];
+  target_category_ids: string[];
+  start_date: string | null;
+  end_date: string | null;
+  is_continuous: boolean;
+  priority: number;
+  frequency_cap_minutes: number;
+  skip_enabled: boolean;
+  skip_offset_seconds: number;
+  exempt_plan_ids: string[];
+  is_active: boolean;
+  is_demo: boolean;
+  impressions_count: number;
+  completions_count: number;
+  skips_count: number;
+  clicks_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbPrerollEvent {
+  id: string;
+  campaign_id: string;
+  event_type: 'impression' | 'completion' | 'skip' | 'click';
+  channel_id: string | null;
+  subscriber_id: string | null;
+  visitor_id: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+

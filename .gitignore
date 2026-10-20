@@ -1,8 +1,37 @@
+# Dependências
 node_modules/
+package-lock.json.bak
+
+# Builds de produção
 build/
 dist/
+
+# Testes e cobertura
 coverage/
-.DS_Store
+
+# Logs de sistema
 *.log
-.env*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Variáveis de ambiente e credenciais (NUNCA SUBIR AO GITHUB)
+.env
+.env.*
 !.env.example
+
+# Dados persistentes locais e backups
+.data/
+backups/
+*.sql
+*.sql.gz
+*.tar.gz
+*.dump
+
+# Uploads gerados em execução (manter diretório com .gitkeep se houver)
+uploads/*
+!uploads/.gitkeep
+
+# Arquivos de sistema operacional
+.DS_Store
+Thumbs.db

@@ -230,3 +230,76 @@ export interface PlaybackStatistics {
   }[];
 }
 
+export interface FeaturedHighlight {
+  id: string;
+  title: string;
+  description?: string | null;
+  imageUrl: string;
+  targetChannelId: string;
+  targetChannelName?: string;
+  targetChannelNumber?: number;
+  buttonText: string;
+  timeLabel?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  placement: 'empty_player' | 'player_banner' | 'both';
+  displayOrder: number;
+  isActive: boolean;
+  isDemo?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface FeaturedSettings {
+  autoplayIntervalSeconds: number;
+  maxActiveHighlights: number;
+  playbackBannerEnabled: boolean;
+}
+
+export type PrerollTargetType = 'all' | 'channels' | 'categories';
+
+export interface PrerollCampaign {
+  id: string;
+  sponsorName: string;
+  title: string;
+  videoUrl: string;
+  targetUrl?: string | null;
+  targetType: PrerollTargetType;
+  targetChannelIds: string[];
+  targetCategoryIds: string[];
+  startDate?: string | null;
+  endDate?: string | null;
+  isContinuous: boolean;
+  priority: number;
+  frequencyCapMinutes: number;
+  skipEnabled: boolean;
+  skipOffsetSeconds: number;
+  exemptPlanIds: string[];
+  isActive: boolean;
+  isDemo?: boolean;
+  impressionsCount: number;
+  completionsCount: number;
+  skipsCount: number;
+  clicksCount: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface EligiblePrerollAd {
+  id: string;
+  sponsorName: string;
+  title: string;
+  videoUrl: string;
+  targetUrl?: string | null;
+  skipEnabled: boolean;
+  skipOffsetSeconds: number;
+  isDemo?: boolean;
+}
+
+export interface PrerollEligibilityResult {
+  authorized: boolean;
+  mode?: string;
+  reason?: string;
+  eligible: boolean;
+  ad: EligiblePrerollAd | null;
+}

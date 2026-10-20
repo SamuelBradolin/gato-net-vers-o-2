@@ -20,10 +20,14 @@ interface HeaderProps {
   isAdminMode: boolean;
   onSearchChange: (query: string) => void;
   searchQuery: string;
+  siteName?: string;
+  tagline?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   customLogoUrl,
+  siteName,
+  tagline,
   onOpenAuth,
   onOpenAdmin,
   onOpenPlans,
@@ -43,7 +47,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Zone 1: Brand Wordmark & Logo */}
         <div className="flex items-center gap-4 shrink-0">
           <a href="#" className="flex items-center focus:outline-none tv-focus-target rounded-lg">
-            <GatoNetLogo customLogoUrl={customLogoUrl} size="md" />
+            <GatoNetLogo customLogoUrl={customLogoUrl} siteName={siteName} tagline={tagline} size="md" />
           </a>
         </div>
 

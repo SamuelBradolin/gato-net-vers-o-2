@@ -1,25 +1,38 @@
 version: '3.8'
 
+# ====================================================================
+# GATO NET — DOCKER COMPOSE PARA VPS VIRTARIX (UBUNTU 24.04 LTS)
+# ====================================================================
+# IMPORTANTE: Os volumes declarados abaixo (gatonet_pgdata, gatonet_uploads
+# e gatonet_data) são nomeados e persistentes. Atualizações de código com
+# 'docker compose up -d --build' NÃO APAGAM e NÃO SOBRESCREVEM os dados.
+# ====================================================================
+
 services:
-  # 1. Banco de Dados PostgreSQL 16 Local na VPS Virtarix
+  # 1. Banco de Dados PostgreSQL 16
   postgres:
     image: postgres:16-alpine
     container_name: gatonet_postgres
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-gatonet_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-AltereEssaSenhaForte123!}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-gatonet_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "127.0.0.1:5432:5432" # Restrito a localhost por segurança
+      - "127.0.0.1:5432:5432" # Restrito estritamente a localhost por segurança da VPS
     volumes:
-      - gatonet_pgdata:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d
+      - gatonet_pgdata:/var/lib/postgresql/data # Persistência garantida dos dados do PostgreSQL
+      - ./postgres/custom-postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./migrations:/docker-entrypoint-initdb.d:ro # Execução automática na 1ª inicialização
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gatonet_user} -d ${POSTGRES_DB:-gatonet_db}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-gatonet_user} -d $${POSTGRES_DB:-gatonet_db}"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - gatonet_network
 
   # 2. Aplicação Backend e Frontend Gato Net (Node.js 22 LTS)
   app:
@@ -27,17 +40,35 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: gatonet_app
-    restart: always
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgres://${POSTGRES_USER:-gatonet_user}:${POSTGRES_PASSWORD:-AltereEssaSenhaForte123!}@postgres:5432/${POSTGRES_DB:-gatonet_db}
+      DATABASE_URL: postgres://${POSTGRES_USER:-gatonet_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gatonet_db}
+      APP_URL: ${APP_URL:-http://localhost:3000}
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3000:3000" # Exposto internamente para o proxy reverso Nginx na VPS
+    volumes:
+      - gatonet_uploads:/app/uploads # Armazenamento permanente de imagens enviadas
+      - gatonet_data:/app/.data     # Armazenamento de estado permanente complementar
+    networks:
+      - gatonet_network
 
+# ====================================================================
+# VOLUMES PERSISTENTES NOMEADOS (NÃO SERÃO APAGADOS EM ATUALIZAÇÕES)
+# ====================================================================
 volumes:
   gatonet_pgdata:
-    driver: local
+    name: gatonet_pgdata
+  gatonet_uploads:
+    name: gatonet_uploads
+  gatonet_data:
+    name: gatonet_data
+
+networks:
+  gatonet_network:
+    name: gatonet_network
+    driver: bridge

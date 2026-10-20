@@ -1,6 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Channel, AdSlot } from '../types';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Channel, AdSlot, FeaturedHighlight, FeaturedSettings, EligiblePrerollAd } from '../types';
 import { AdBanner } from './AdBanner';
+import { FeaturedCarousel } from './FeaturedCarousel';
+import { FeaturedBanner } from './FeaturedBanner';
 import {
   Play,
   Pause,
@@ -13,7 +15,11 @@ import {
   RotateCcw,
   Sparkles,
   Settings2,
-  ShieldAlert
+  ShieldAlert,
+  Megaphone,
+  ExternalLink,
+  FastForward,
+  Clock
 } from 'lucide-react';
 
 interface PlayerProps {
@@ -22,6 +28,8 @@ interface PlayerProps {
   isAccessAllowed: boolean;
   accessModeNotice?: string;
   userEmail?: string | null;
+  featuredHighlights?: FeaturedHighlight[];
+  featuredSettings?: FeaturedSettings;
   onOpenPlans: () => void;
   onOpenAuth: () => void;
   onOpenSessions?: () => void;
@@ -34,12 +42,15 @@ export const Player: React.FC<PlayerProps> = ({
   isAccessAllowed,
   accessModeNotice,
   userEmail,
+  featuredHighlights = [],
+  featuredSettings,
   onOpenPlans,
   onOpenAuth,
   onOpenSessions,
   onSelectQuickChannel
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const prerollVideoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -58,6 +69,28 @@ export const Player: React.FC<PlayerProps> = ({
   const [sessionLimitNotice, setSessionLimitNotice] = useState('');
   const [sessionTerminatedNotice, setSessionTerminatedNotice] = useState('');
   const [, setCurrentSessionId] = useState<string | null>(null);
+
+  // Pre-roll Video Advertising State
+  const [isPrerollActive, setIsPrerollActive] = useState(false);
+  const [currentPrerollAd, setCurrentPrerollAd] = useState<EligiblePrerollAd | null>(null);
+  const [skipCountdown, setSkipCountdown] = useState<number>(5);
+  const [canSkipPreroll, setCanSkipPreroll] = useState<boolean>(false);
+  const [prerollProgress, setPrerollProgress] = useState<{ currentTime: number; duration: number }>({ currentTime: 0, duration: 0 });
+  const [prerollImpressionSent, setPrerollImpressionSent] = useState(false);
+
+  // Persistent visitor ID for accurate frequency capping and events
+  const getVisitorId = useCallback(() => {
+    try {
+      let vid = localStorage.getItem('gatonet_visitor_id');
+      if (!vid) {
+        vid = 'v_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now().toString(36);
+        localStorage.setItem('gatonet_visitor_id', vid);
+      }
+      return vid;
+    } catch {
+      return 'v_temp';
+    }
+  }, []);
 
   // Detect human-readable device name
   const getDeviceName = () => {
@@ -158,21 +191,11 @@ export const Player: React.FC<PlayerProps> = ({
     };
   }, [selectedChannel, isAccessAllowed, userEmail]);
 
-  // When selectedChannel changes, prepare the stream
-  useEffect(() => {
-    if (!selectedChannel) {
-      setIsPlaying(false);
-      setHasError(false);
-      setIsLoading(false);
-      return;
-    }
-
-    setHasError(false);
-    setIsLoading(true);
-    setCurrentStreamIndex(0);
-
-    // Load new channel video
-    if (videoRef.current) {
+  // Start channel stream playback helper
+  const startChannelPlaybackDirectly = useCallback(() => {
+    setIsPrerollActive(false);
+    setCurrentPrerollAd(null);
+    if (videoRef.current && selectedChannel) {
       videoRef.current.src = selectedChannel.streamUrl;
       videoRef.current.load();
       videoRef.current
@@ -187,6 +210,127 @@ export const Player: React.FC<PlayerProps> = ({
         });
     }
   }, [selectedChannel]);
+
+  // Pre-roll completion and skip handler
+  const handleEndPreroll = useCallback((reason: 'completion' | 'skip' | 'error') => {
+    if (!isPrerollActive) return;
+
+    if (currentPrerollAd && (reason === 'completion' || reason === 'skip')) {
+      fetch('/api/public/preroll/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId: currentPrerollAd.id,
+          eventType: reason,
+          channelId: selectedChannel?.id,
+          userEmail,
+          visitorId: getVisitorId()
+        })
+      }).catch(() => {});
+    }
+
+    startChannelPlaybackDirectly();
+  }, [isPrerollActive, currentPrerollAd, selectedChannel, userEmail, getVisitorId, startChannelPlaybackDirectly]);
+
+  // Handle clicking sponsor banner / CTA
+  const handlePrerollClickSponsor = () => {
+    if (!currentPrerollAd?.targetUrl) return;
+
+    fetch('/api/public/preroll/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        campaignId: currentPrerollAd.id,
+        eventType: 'click',
+        channelId: selectedChannel?.id,
+        userEmail,
+        visitorId: getVisitorId()
+      })
+    }).catch(() => {});
+
+    try {
+      window.open(currentPrerollAd.targetUrl, '_blank', 'noopener,noreferrer');
+    } catch {
+      // safe fallback
+    }
+  };
+
+  // When selectedChannel changes, verify pre-roll eligibility and prepare stream in parallel
+  useEffect(() => {
+    if (!selectedChannel) {
+      setIsPlaying(false);
+      setHasError(false);
+      setIsLoading(false);
+      setIsPrerollActive(false);
+      setCurrentPrerollAd(null);
+      return;
+    }
+
+    if (!isAccessAllowed) {
+      setIsPlaying(false);
+      setIsLoading(false);
+      setIsPrerollActive(false);
+      setCurrentPrerollAd(null);
+      return;
+    }
+
+    let isCancelled = false;
+    setHasError(false);
+    setIsLoading(true);
+    setCurrentStreamIndex(0);
+    setPrerollImpressionSent(false);
+
+    // Prepare channel stream in parallel (metadata only, without sound or high bandwidth consumption)
+    if (videoRef.current) {
+      videoRef.current.preload = 'metadata';
+      videoRef.current.src = selectedChannel.streamUrl;
+      videoRef.current.load();
+    }
+
+    // Check for active eligible pre-roll ad for this channel and visitor/user
+    fetch('/api/public/preroll/eligible', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        channelId: selectedChannel.id,
+        userEmail,
+        visitorId: getVisitorId()
+      })
+    })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (isCancelled) return;
+        if (data?.eligible && data.ad) {
+          const ad: EligiblePrerollAd = data.ad;
+          setCurrentPrerollAd(ad);
+          setIsPrerollActive(true);
+          setSkipCountdown(ad.skipOffsetSeconds || 0);
+          setCanSkipPreroll((ad.skipOffsetSeconds || 0) <= 0);
+          setIsLoading(false);
+
+          // Timeout failsafe: if ad doesn't start or stalls within 5s, continue to channel automatically
+          const timer = setTimeout(() => {
+            if (!isCancelled && isPrerollActive && prerollProgress.currentTime === 0) {
+              console.warn('[Player] Pre-roll video timeout reached. Advancing directly to channel stream.');
+              startChannelPlaybackDirectly();
+            }
+          }, 5000);
+
+          return () => clearTimeout(timer);
+        } else {
+          startChannelPlaybackDirectly();
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          startChannelPlaybackDirectly();
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedChannel, isAccessAllowed, userEmail, getVisitorId, startChannelPlaybackDirectly]);
 
   // Fullscreen change listener
   useEffect(() => {
@@ -272,6 +416,17 @@ export const Player: React.FC<PlayerProps> = ({
 
   return (
     <div className="w-full">
+      {/* 0. FeaturedBanner: Programming highlights ribbon during active playback */}
+      {selectedChannel && (
+        <FeaturedBanner
+          highlights={featuredHighlights}
+          autoplayIntervalSeconds={featuredSettings?.autoplayIntervalSeconds || 6}
+          isEnabled={featuredSettings?.playbackBannerEnabled !== false}
+          isFullscreen={isFullscreen}
+          onSelectChannel={onSelectQuickChannel}
+        />
+      )}
+
       {/* 2-Column layout on desktop: Player + Side Ad Banner */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* Main Video Viewport (Col 1 to 8/9 on desktop) */}
@@ -328,7 +483,7 @@ export const Player: React.FC<PlayerProps> = ({
                     <Tv className="w-4 h-4" />
                   </div>
                   <span className="font-semibold text-white">Gato Net</span>
-                  <span className="text-xs text-slate-400">· Selecione um canal demonstrativo abaixo</span>
+                  <span className="text-xs text-slate-400">· Selecione um canal ou atração em destaque abaixo</span>
                 </div>
               )}
             </div>
@@ -361,82 +516,167 @@ export const Player: React.FC<PlayerProps> = ({
               aspectRatio169 ? 'aspect-video' : 'aspect-[4/3]'
             }`}
           >
-            {/* HTML5 Video Element */}
+            {/* HTML5 Video Element (Main Channel Stream) */}
             {selectedChannel && (
               <video
                 ref={videoRef}
                 playsInline
                 loop
                 className={`w-full h-full object-cover transition-opacity duration-300 ${
-                  isLoading || hasError || !isAccessAllowed ? 'opacity-20 pointer-events-none' : 'opacity-100'
+                  isLoading || hasError || !isAccessAllowed || isPrerollActive
+                    ? 'opacity-0 pointer-events-none'
+                    : 'opacity-100'
                 }`}
-                onWaiting={() => setIsLoading(true)}
+                onWaiting={() => {
+                  if (!isPrerollActive) setIsLoading(true);
+                }}
                 onPlaying={() => {
-                  setIsLoading(false);
-                  setHasError(false);
+                  if (!isPrerollActive) {
+                    setIsLoading(false);
+                    setHasError(false);
+                  }
                 }}
                 onError={() => {
-                  setIsLoading(false);
-                  setHasError(true);
+                  if (!isPrerollActive) {
+                    setIsLoading(false);
+                    setHasError(true);
+                  }
                 }}
               />
             )}
 
-            {/* STATE 1: INITIAL UNSELECTED STATE (Visitor has not selected a channel yet) */}
-            {!selectedChannel && (
-              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center text-center p-6 bg-gradient-to-b from-[#0b1329]/90 via-[#060911]/95 to-[#03060c]">
-                <img
-                  src="/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg"
-                  alt="Gato Net"
-                  className="absolute inset-0 w-full h-full object-cover opacity-20 pointer-events-none"
+            {/* PRE-ROLL VIDEO AD PLAYER OVERLAY */}
+            {selectedChannel && isAccessAllowed && isPrerollActive && currentPrerollAd && (
+              <div className="absolute inset-0 z-25 bg-black flex items-center justify-center overflow-hidden">
+                <video
+                  ref={prerollVideoRef}
+                  playsInline
+                  autoPlay
+                  src={currentPrerollAd.videoUrl}
+                  className="w-full h-full object-cover"
+                  onTimeUpdate={(e) => {
+                    const v = e.currentTarget;
+                    const cur = v.currentTime;
+                    const dur = v.duration || 1;
+                    setPrerollProgress({ currentTime: cur, duration: dur });
+
+                    if (currentPrerollAd.skipEnabled) {
+                      const remaining = Math.max(0, Math.ceil((currentPrerollAd.skipOffsetSeconds || 5) - cur));
+                      setSkipCountdown(remaining);
+                      if (remaining === 0 && !canSkipPreroll) {
+                        setCanSkipPreroll(true);
+                      }
+                    }
+                  }}
+                  onPlay={() => {
+                    if (!prerollImpressionSent && currentPrerollAd) {
+                      setPrerollImpressionSent(true);
+                      fetch('/api/public/preroll/event', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          campaignId: currentPrerollAd.id,
+                          eventType: 'impression',
+                          channelId: selectedChannel.id,
+                          userEmail,
+                          visitorId: getVisitorId()
+                        })
+                      }).catch(() => {});
+                    }
+                  }}
+                  onEnded={() => handleEndPreroll('completion')}
+                  onError={() => {
+                    console.warn('[Player] Falha na reprodução do vídeo publicitário. Iniciando canal diretamente.');
+                    handleEndPreroll('error');
+                  }}
                 />
-                <div className="relative z-10 max-w-lg space-y-4">
-                  <div className="w-16 h-16 mx-auto rounded-2xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shadow-[0_0_30px_rgba(37,99,235,0.3)]">
-                    <Tv className="w-8 h-8" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
-                      Pronto para sintonizar a Gato Net
-                    </h2>
-                    <p className="text-sm text-slate-300 mt-1.5 leading-relaxed">
-                      Selecione qualquer canal demonstrativo na grade abaixo para iniciar a reprodução.
-                    </p>
+
+                {/* Top Publicidade Bar */}
+                <div className="absolute top-0 inset-x-0 p-3 sm:p-4 bg-gradient-to-b from-black/90 via-black/50 to-transparent flex items-center justify-between gap-3 pointer-events-auto">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-black tracking-wider uppercase bg-amber-400 text-black shadow-md flex items-center gap-1">
+                      <Megaphone className="w-3 h-3" />
+                      <span>Publicidade</span>
+                    </span>
+                    <div className="text-xs text-white truncate font-medium">
+                      Patrocínio: <span className="font-bold text-amber-300">{currentPrerollAd.sponsorName}</span>
+                    </div>
+                    {currentPrerollAd.isDemo && (
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 hidden sm:inline-block">
+                        Demonstração
+                      </span>
+                    )}
                   </div>
 
-                  {/* Quick Canal Starters */}
-                  <div className="pt-2">
-                    <span className="block text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2.5">
-                      Canais Demonstrativos Disponíveis:
-                    </span>
-                    <div className="flex flex-wrap items-center justify-center gap-2">
-                      <button
-                        onClick={() => onSelectQuickChannel('ch_globo')}
-                        className="px-3 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 border border-blue-500/30 text-xs font-semibold text-white transition-colors cursor-pointer"
-                      >
-                        Rede Globo (Demo)
-                      </button>
-                      <button
-                        onClick={() => onSelectQuickChannel('ch_gato_esportes_1')}
-                        className="px-3 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 border border-blue-500/30 text-xs font-semibold text-white transition-colors cursor-pointer"
-                      >
-                        Gato Esporte 1 (Demo)
-                      </button>
-                      <button
-                        onClick={() => onSelectQuickChannel('ch_cine_prime')}
-                        className="px-3 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 border border-blue-500/30 text-xs font-semibold text-white transition-colors cursor-pointer"
-                      >
-                        Cine Prime (Demo)
-                      </button>
-                      <button
-                        onClick={() => onSelectQuickChannel('ch_gato_news_24h')}
-                        className="px-3 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 border border-blue-500/30 text-xs font-semibold text-white transition-colors cursor-pointer"
-                      >
-                        Gato Notícias (Demo)
-                      </button>
+                  {currentPrerollAd.targetUrl && (
+                    <button
+                      type="button"
+                      onClick={handlePrerollClickSponsor}
+                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-lg hover:shadow-blue-600/30 shrink-0"
+                    >
+                      <span>Visitar Patrocinador</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Bottom Progress & Skip Bar */}
+                <div className="absolute bottom-0 inset-x-0 p-3 sm:p-4 bg-gradient-to-t from-black/95 via-black/60 to-transparent flex flex-col gap-2 pointer-events-auto">
+                  {/* Progress timeline bar */}
+                  <div className="w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden">
+                    <div
+                      className="bg-amber-400 h-full transition-all duration-200"
+                      style={{
+                        width: `${Math.min(100, (prerollProgress.currentTime / (prerollProgress.duration || 1)) * 100)}%`
+                      }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <div className="text-[11px] sm:text-xs text-slate-300 flex items-center gap-2">
+                      <Clock className="w-3.5 h-3.5 text-amber-400" />
+                      <span>
+                        O canal iniciará em{' '}
+                        <strong className="text-white font-mono">
+                          {Math.max(0, Math.ceil((prerollProgress.duration || 0) - prerollProgress.currentTime))}s
+                        </strong>
+                      </span>
                     </div>
+
+                    {currentPrerollAd.skipEnabled ? (
+                      canSkipPreroll ? (
+                        <button
+                          type="button"
+                          onClick={() => handleEndPreroll('skip')}
+                          className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-extrabold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-lg animate-pulse"
+                        >
+                          <span>Pular Anúncio</span>
+                          <FastForward className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <div className="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1.5 font-mono">
+                          <Clock className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Pular anúncio em {skipCountdown}s</span>
+                        </div>
+                      )
+                    ) : (
+                      <span className="text-[11px] font-mono text-slate-400">
+                        Vídeo promocional obrigatório
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* STATE 1: INITIAL UNSELECTED STATE — Interactive Featured Highlights Carousel */}
+            {!selectedChannel && (
+              <FeaturedCarousel
+                highlights={featuredHighlights}
+                autoplayIntervalSeconds={featuredSettings?.autoplayIntervalSeconds || 6}
+                onSelectChannel={onSelectQuickChannel}
+                onSelectQuickChannel={onSelectQuickChannel}
+              />
             )}
 
             {/* STATE 2: ACCESS RESTRICTION OVERLAY (When Modo 2 or Modo 3 is enabled in Admin) */}
@@ -522,7 +762,7 @@ export const Player: React.FC<PlayerProps> = ({
             )}
 
             {/* STATE 3: LOADING / BUFFERING OVERLAY */}
-            {selectedChannel && isLoading && (
+            {selectedChannel && isLoading && !isPrerollActive && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 pointer-events-none">
                 <div className="w-12 h-12 rounded-full border-3 border-blue-500/30 border-t-blue-400 animate-spin" />
                 <span className="mt-3 text-xs font-mono font-medium text-slate-200 tracking-wide">
@@ -532,7 +772,7 @@ export const Player: React.FC<PlayerProps> = ({
             )}
 
             {/* STATE 4: STREAM ERROR / UNAVAILABLE OVERLAY */}
-            {selectedChannel && hasError && (
+            {selectedChannel && hasError && !isPrerollActive && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 text-center bg-[#090e1c]/95">
                 <div className="max-w-md space-y-3">
                   <div className="w-12 h-12 mx-auto rounded-xl bg-red-600/20 border border-red-500/40 flex items-center justify-center text-red-400">
@@ -558,7 +798,7 @@ export const Player: React.FC<PlayerProps> = ({
             )}
 
             {/* STREAM CONTROLS OVERLAY (Visible when playing) */}
-            {selectedChannel && isAccessAllowed && !hasError && (
+            {selectedChannel && isAccessAllowed && !hasError && !isPrerollActive && (
               <div className="absolute inset-x-0 bottom-0 z-15 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-4 sm:p-5 flex flex-col gap-2 opacity-95 hover:opacity-100 transition-opacity">
                 {/* Control bar */}
                 <div className="flex items-center justify-between gap-3">

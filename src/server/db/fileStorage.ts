@@ -16,7 +16,11 @@ import {
   DbAccessModes,
   DbPlaybackSession,
   DbManualOrder,
-  PasswordResetToken
+  PasswordResetToken,
+  DbFeaturedHighlight,
+  DbFeaturedSettings,
+  DbPrerollCampaign,
+  DbPrerollEvent
 } from './schema.js';
 import {
   INITIAL_CATEGORIES,
@@ -50,6 +54,10 @@ export interface DatabaseState {
   access_modes: DbAccessModes;
   playback_sessions: DbPlaybackSession[];
   manual_orders: DbManualOrder[];
+  featured_highlights: DbFeaturedHighlight[];
+  featured_settings: DbFeaturedSettings;
+  preroll_campaigns: DbPrerollCampaign[];
+  preroll_events: DbPrerollEvent[];
 }
 
 let memoryState: DatabaseState | null = null;
@@ -195,7 +203,122 @@ function getInitialState(): DatabaseState {
       updated_at: new Date().toISOString()
     },
     playback_sessions: [],
-    manual_orders: []
+    manual_orders: [],
+    featured_highlights: [
+      {
+        id: 'feat_sports_demo',
+        title: 'Grande Clássico de Domingo (Demonstração)',
+        description: 'Sinal de teste para transmissão esportiva em alta definição com comentários ao vivo.',
+        image_url: '/src/assets/images/tv_sports_broadcast_1792172574447.jpg',
+        target_channel_id: 'ch_gato_esportes_1',
+        button_text: 'Assistir agora (Demo)',
+        time_label: 'Domingo às 16:00 (Sinal de Teste)',
+        start_date: null,
+        end_date: null,
+        placement: 'both',
+        display_order: 1,
+        is_active: true,
+        is_demo: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: 'feat_cinema_demo',
+        title: 'Festival de Filmes Épicos (Demonstração)',
+        description: 'Maratona cinematográfica demonstrativa no canal Cine Prime em sinal de homologação.',
+        image_url: '/src/assets/images/tv_cinema_backdrop_1792172575834.jpg',
+        target_channel_id: 'ch_cine_prime',
+        button_text: 'Ver Programação (Demo)',
+        time_label: 'Hoje às 22:00 (Sinal de Teste)',
+        start_date: null,
+        end_date: null,
+        placement: 'both',
+        display_order: 2,
+        is_active: true,
+        is_demo: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: 'feat_news_demo',
+        title: 'Plantão Noticioso 24 Horas (Demonstração)',
+        description: 'Cobertura contínua e boletins de notícias em tempo real no canal de jornalismo.',
+        image_url: '/src/assets/images/tv_news_studio_1792172576166.jpg',
+        target_channel_id: 'ch_gato_news_24h',
+        button_text: 'Assistir ao Vivo (Demo)',
+        time_label: 'Ao Vivo (Transmissão de Teste)',
+        start_date: null,
+        end_date: null,
+        placement: 'both',
+        display_order: 3,
+        is_active: true,
+        is_demo: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    ],
+    featured_settings: {
+      id: 'primary',
+      autoplay_interval_seconds: 6,
+      max_active_highlights: 6,
+      playback_banner_enabled: true,
+      updated_at: new Date().toISOString()
+    },
+    preroll_campaigns: [
+      {
+        id: 'camp_virtarix_demo',
+        sponsor_name: 'Virtarix Cloud',
+        title: 'VPS Virtarix Cloud — Servidores Dedicados no Brasil (Demonstração)',
+        video_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+        target_url: 'https://virtarix.com.br',
+        target_type: 'all',
+        target_channel_ids: [],
+        target_category_ids: [],
+        start_date: null,
+        end_date: null,
+        is_continuous: true,
+        priority: 10,
+        frequency_cap_minutes: 15,
+        skip_enabled: true,
+        skip_offset_seconds: 5,
+        exempt_plan_ids: ['plan_anual', 'plan_semestral'],
+        is_active: true,
+        is_demo: true,
+        impressions_count: 0,
+        completions_count: 0,
+        skips_count: 0,
+        clicks_count: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: 'camp_fibra_demo',
+        sponsor_name: 'Gato Net Fibra',
+        title: 'Gato Net Ultra Fibra 1 Giga — Conexão Gamer sem Latência (Demonstração)',
+        video_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+        target_url: 'https://gatonet.tv/fibra',
+        target_type: 'all',
+        target_channel_ids: [],
+        target_category_ids: [],
+        start_date: null,
+        end_date: null,
+        is_continuous: true,
+        priority: 8,
+        frequency_cap_minutes: 30,
+        skip_enabled: true,
+        skip_offset_seconds: 5,
+        exempt_plan_ids: ['plan_anual'],
+        is_active: true,
+        is_demo: true,
+        impressions_count: 0,
+        completions_count: 0,
+        skips_count: 0,
+        clicks_count: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    ],
+    preroll_events: []
   };
 }
 
@@ -216,6 +339,129 @@ export function loadDatabase(): DatabaseState {
       if (!parsed.password_reset_tokens) parsed.password_reset_tokens = [];
       if (!parsed.playback_sessions) parsed.playback_sessions = [];
       if (!parsed.manual_orders) parsed.manual_orders = [];
+      if (!parsed.featured_highlights || !Array.isArray(parsed.featured_highlights)) {
+        parsed.featured_highlights = [
+          {
+            id: 'feat_sports_demo',
+            title: 'Grande Clássico de Domingo (Demonstração)',
+            description: 'Sinal de teste para transmissão esportiva em alta definição com comentários ao vivo.',
+            image_url: '/src/assets/images/tv_sports_broadcast_1792172574447.jpg',
+            target_channel_id: 'ch_gato_esportes_1',
+            button_text: 'Assistir agora (Demo)',
+            time_label: 'Domingo às 16:00 (Sinal de Teste)',
+            start_date: null,
+            end_date: null,
+            placement: 'both',
+            display_order: 1,
+            is_active: true,
+            is_demo: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          },
+          {
+            id: 'feat_cinema_demo',
+            title: 'Festival de Filmes Épicos (Demonstração)',
+            description: 'Maratona cinematográfica demonstrativa no canal Cine Prime em sinal de homologação.',
+            image_url: '/src/assets/images/tv_cinema_backdrop_1792172575834.jpg',
+            target_channel_id: 'ch_cine_prime',
+            button_text: 'Ver Programação (Demo)',
+            time_label: 'Hoje às 22:00 (Sinal de Teste)',
+            start_date: null,
+            end_date: null,
+            placement: 'both',
+            display_order: 2,
+            is_active: true,
+            is_demo: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          },
+          {
+            id: 'feat_news_demo',
+            title: 'Plantão Noticioso 24 Horas (Demonstração)',
+            description: 'Cobertura contínua e boletins de notícias em tempo real no canal de jornalismo.',
+            image_url: '/src/assets/images/tv_news_studio_1792172576166.jpg',
+            target_channel_id: 'ch_gato_news_24h',
+            button_text: 'Assistir ao Vivo (Demo)',
+            time_label: 'Ao Vivo (Transmissão de Teste)',
+            start_date: null,
+            end_date: null,
+            placement: 'both',
+            display_order: 3,
+            is_active: true,
+            is_demo: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ];
+      }
+      if (!parsed.featured_settings) {
+        parsed.featured_settings = {
+          id: 'primary',
+          autoplay_interval_seconds: 6,
+          max_active_highlights: 6,
+          playback_banner_enabled: true,
+          updated_at: new Date().toISOString()
+        };
+      }
+      if (!parsed.preroll_campaigns || !Array.isArray(parsed.preroll_campaigns)) {
+        parsed.preroll_campaigns = [
+          {
+            id: 'camp_virtarix_demo',
+            sponsor_name: 'Virtarix Cloud',
+            title: 'VPS Virtarix Cloud — Servidores Dedicados no Brasil (Demonstração)',
+            video_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+            target_url: 'https://virtarix.com.br',
+            target_type: 'all',
+            target_channel_ids: [],
+            target_category_ids: [],
+            start_date: null,
+            end_date: null,
+            is_continuous: true,
+            priority: 10,
+            frequency_cap_minutes: 15,
+            skip_enabled: true,
+            skip_offset_seconds: 5,
+            exempt_plan_ids: ['plan_anual', 'plan_semestral'],
+            is_active: true,
+            is_demo: true,
+            impressions_count: 0,
+            completions_count: 0,
+            skips_count: 0,
+            clicks_count: 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          },
+          {
+            id: 'camp_fibra_demo',
+            sponsor_name: 'Gato Net Fibra',
+            title: 'Gato Net Ultra Fibra 1 Giga — Conexão Gamer sem Latência (Demonstração)',
+            video_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+            target_url: 'https://gatonet.tv/fibra',
+            target_type: 'all',
+            target_channel_ids: [],
+            target_category_ids: [],
+            start_date: null,
+            end_date: null,
+            is_continuous: true,
+            priority: 8,
+            frequency_cap_minutes: 30,
+            skip_enabled: true,
+            skip_offset_seconds: 5,
+            exempt_plan_ids: ['plan_anual'],
+            is_active: true,
+            is_demo: true,
+            impressions_count: 0,
+            completions_count: 0,
+            skips_count: 0,
+            clicks_count: 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ];
+      }
+      if (!parsed.preroll_events || !Array.isArray(parsed.preroll_events)) {
+        parsed.preroll_events = [];
+      }
       if (Array.isArray(parsed.subscription_plans)) {
         parsed.subscription_plans = parsed.subscription_plans.map((p: any) => ({
           ...p,
