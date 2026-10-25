@@ -20,7 +20,11 @@ import {
   getFeaturedHighlights,
   getFeaturedSettings,
   getEligiblePrerollCampaign,
-  recordPrerollEvent
+  recordPrerollEvent,
+  getEligibleInPlayBanner,
+  getFootballMatches,
+  getFootballTeams,
+  getFootballAgendaSettings
 } from '../db/repository.js';
 import { hashPassword, verifyPassword } from '../auth/argon2.js';
 
@@ -60,11 +64,76 @@ router.get('/public/settings', async (_req: Request, res: Response) => {
       allowPublicBrowse: accessModes.allow_public_browse,
       maxSimultaneousStreams: accessModes.max_simultaneous_streams,
       streamRelayEnabled: accessModes.stream_relay_enabled,
+      allowedIframeDomains: accessModes.allowed_iframe_domains || [],
+      defaultHomeTab: accessModes.default_home_tab || 'cat_football',
       adSlots: adSlots.filter(a => a.is_enabled),
       featuredSettings
     });
   } catch (err: any) {
     res.status(500).json({ error: 'Erro ao carregar configurações públicas' });
+  }
+});
+
+// 3.0. Football Live & Agenda Public Endpoints
+router.get('/public/football/matches', async (_req: Request, res: Response) => {
+  try {
+    const [matches, settings] = await Promise.all([
+      getFootballMatches(false),
+      getFootballAgendaSettings()
+    ]);
+
+    if (!settings.is_enabled) {
+      return res.json([]);
+    }
+
+    const now = new Date();
+    const hideHours = settings.hide_finished_after_hours || 3;
+    const hideThresholdMs = now.getTime() - (hideHours * 60 * 60 * 1000);
+
+    // Filter out finished matches older than hideHours
+    const filtered = matches.filter(m => {
+      if (m.status === 'finished') {
+        const matchDateTime = new Date(`${m.match_date}T${m.match_time || '00:00'}:00`);
+        if (!isNaN(matchDateTime.getTime()) && matchDateTime.getTime() < hideThresholdMs) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // Sort according to settings
+    if (settings.default_view_mode === 'live_first') {
+      filtered.sort((a, b) => {
+        const aIsLive = a.status === 'live' ? 0 : 1;
+        const bIsLive = b.status === 'live' ? 0 : 1;
+        if (aIsLive !== bIsLive) return aIsLive - bIsLive;
+        if (a.display_order !== b.display_order) return a.display_order - b.display_order;
+        if (a.match_date !== b.match_date) return a.match_date.localeCompare(b.match_date);
+        return a.match_time.localeCompare(b.match_time);
+      });
+    }
+
+    res.json(filtered);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao carregar agenda de futebol' });
+  }
+});
+
+router.get('/public/football/teams', async (_req: Request, res: Response) => {
+  try {
+    const teams = await getFootballTeams();
+    res.json(teams);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao carregar equipes' });
+  }
+});
+
+router.get('/public/football/settings', async (_req: Request, res: Response) => {
+  try {
+    const settings = await getFootballAgendaSettings();
+    res.json(settings);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao carregar configurações da agenda' });
   }
 });
 
@@ -512,5 +581,23 @@ router.post('/public/preroll/event', async (req: Request, res: Response) => {
   }
 });
 
+// 17. Check eligible In-Play banner for player
+router.post('/public/inplay/eligible', async (req: Request, res: Response) => {
+  try {
+    const { channelId, userEmail } = req.body;
+    if (!channelId) {
+      res.status(400).json({ error: 'channelId é obrigatório' });
+      return;
+    }
+
+    const result = await getEligibleInPlayBanner({ channelId, userEmail });
+    res.json(result);
+  } catch (err: any) {
+    console.error('[InPlay Eligible Error]', err);
+    res.status(500).json({ error: 'Erro ao verificar publicidade In-Play' });
+  }
+});
+
 export default router;
+
 

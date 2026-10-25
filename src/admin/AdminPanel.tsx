@@ -4,11 +4,19 @@ import {
   Category,
   SubscriptionPlan,
   AdSlot,
+  AdContentType,
   SystemSettings,
   PaymentSettings,
   UserSubscriber,
-  AccessMode
+  AccessMode,
+  InPlaySettings,
+  InPlayAdFormat,
+  InPlayPosition,
+  InPlayTargetType,
+  AuthorizedIframeDomain,
+  FootballMatch
 } from '../types';
+import { FootballAgendaAdmin } from './FootballAgendaAdmin';
 import {
   LayoutDashboard,
   Tv,
@@ -67,7 +75,8 @@ import {
   FastForward,
   MousePointerClick,
   Percent,
-  PlaySquare
+  PlaySquare,
+  Trophy
 } from 'lucide-react';
 import { AdminLogin } from './AdminLogin';
 
@@ -102,7 +111,8 @@ type AdminSection =
   | 'analytics'
   | 'settings'
   | 'security'
-  | 'featured';
+  | 'featured'
+  | 'football';
 
 interface CurrentAdmin {
   id: string;
@@ -166,6 +176,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [channelFormError, setChannelFormError] = useState<string | null>(null);
   const [isSavingChannel, setIsSavingChannel] = useState(false);
 
+  // Channel Player Type & External Iframe state
+  const [channelFormPlayerType, setChannelFormPlayerType] = useState<'internal' | 'external_iframe'>('internal');
+  const [channelFormIframeCode, setChannelFormIframeCode] = useState('');
+  const [channelFormIframeTestUrl, setChannelFormIframeTestUrl] = useState('');
+  const [isValidatingIframe, setIsValidatingIframe] = useState(false);
+  const [iframeValidationNotice, setIframeValidationNotice] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    safeUrl?: string;
+  } | null>(null);
+
   // Section 9: Manual Payment Orders & Financial History State
   const [paymentSubTab, setPaymentSubTab] = useState<'orders' | 'configs' | 'financial'>('orders');
   const [manualOrders, setManualOrders] = useState<any[]>([]);
@@ -195,7 +216,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [tempAllowPublicBrowse, setTempAllowPublicBrowse] = useState<boolean>(systemSettings.allowPublicChannelBrowse ?? true);
   const [tempMaxSimultaneousStreams, setTempMaxSimultaneousStreams] = useState<number>(systemSettings.maxSimultaneousStreams || 2);
   const [tempStreamRelayEnabled, setTempStreamRelayEnabled] = useState<boolean>(systemSettings.streamRelayEnabled ?? false);
+  const [tempDefaultHomeTab, setTempDefaultHomeTab] = useState<string>(systemSettings.defaultHomeTab || 'cat_football');
+  const [tempIframeDomains, setTempIframeDomains] = useState<string[]>(
+    systemSettings.allowedIframeDomains || ['youtube.com', 'youtu.be', 'vimeo.com', 'player.vimeo.com', 'cloudflarestream.com', 'twitch.tv', 'dailymotion.com']
+  );
+  const [newIframeDomainInput, setNewIframeDomainInput] = useState('');
   const [isSavingGeneralSettings, setIsSavingGeneralSettings] = useState(false);
+
+  // Dedicated Authorized Iframe Domains state (Seção 11: Persistência PostgreSQL & Gestão Rígida)
+  const [authorizedDomainsList, setAuthorizedDomainsList] = useState<AuthorizedIframeDomain[]>([]);
+  const [isLoadingAuthorizedDomains, setIsLoadingAuthorizedDomains] = useState(false);
+  const [newAuthorizedDomainInput, setNewAuthorizedDomainInput] = useState('');
+  const [isAuthorizingDomain, setIsAuthorizingDomain] = useState(false);
+  const [domainActionLoadingId, setDomainActionLoadingId] = useState<string | null>(null);
+  const [domainFilter, setDomainFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [domainSearchQuery, setDomainSearchQuery] = useState('');
 
   // Payments Form State
   const [pixKey, setPixKey] = useState(paymentSettings.pix.key);
@@ -267,7 +302,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [previewTab, setPreviewTab] = useState<'carousel' | 'banner'>('carousel');
 
   // Section 5: Pre-roll Video Advertising Management State
-  const [adTab, setAdTab] = useState<'preroll' | 'banners'>('preroll');
+  const [adTab, setAdTab] = useState<'preroll' | 'banners' | 'inplay'>('preroll');
+
+  // Sub-tab 3: In-Play Video Banner Advertising State
+  const [inplaySettings, setInplaySettings] = useState<InPlaySettings | null>(null);
+  const [inplayIsEnabled, setInplayIsEnabled] = useState(false);
+  const [inplayAdFormat, setInplayAdFormat] = useState<InPlayAdFormat>('script');
+  const [inplayAdScriptCode, setInplayAdScriptCode] = useState('');
+  const [inplayBannerImageUrl, setInplayBannerImageUrl] = useState('');
+  const [inplayBannerTargetUrl, setInplayBannerTargetUrl] = useState('');
+  const [inplayBannerTitle, setInplayBannerTitle] = useState('');
+  const [inplayPosition, setInplayPosition] = useState<InPlayPosition>('bottom_center');
+  const [inplayDelaySeconds, setInplayDelaySeconds] = useState(10);
+  const [inplayIntervalMinutes, setInplayIntervalMinutes] = useState(5);
+  const [inplayDurationSeconds, setInplayDurationSeconds] = useState(15);
+  const [inplayFadeOutSeconds, setInplayFadeOutSeconds] = useState(1.0);
+  const [inplayCloseButtonEnabled, setInplayCloseButtonEnabled] = useState(true);
+  const [inplayTargetType, setInplayTargetType] = useState<InPlayTargetType>('all');
+  const [inplayTargetChannelIds, setInplayTargetChannelIds] = useState<string[]>([]);
+  const [inplayTargetCategoryIds, setInplayTargetCategoryIds] = useState<string[]>([]);
+  const [inplayExemptPlanIds, setInplayExemptPlanIds] = useState<string[]>(['plan_anual', 'plan_semestral']);
+  const [inplayChannelSearchQuery, setInplayChannelSearchQuery] = useState('');
+  const [isLoadingInPlay, setIsLoadingInPlay] = useState(false);
+  const [isSavingInPlay, setIsSavingInPlay] = useState(false);
+  const [inplayNoticeWarning, setInplayNoticeWarning] = useState<string | null>(null);
+  const [inplaySuccessMessage, setInplaySuccessMessage] = useState<string | null>(null);
+  const [inplayErrorMessage, setInplayErrorMessage] = useState<string | null>(null);
+  const [isUploadingInplayImage, setIsUploadingInplayImage] = useState(false);
   const [prerollCampaigns, setPrerollCampaigns] = useState<any[]>([]);
   const [prerollSummary, setPrerollSummary] = useState({
     totalCampaigns: 0,
@@ -309,6 +370,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [prerollError, setPrerollError] = useState<string | null>(null);
   const [channelSearchQuery, setChannelSearchQuery] = useState('');
 
+  // Section 5.2: Gerenciamento Completo de Banners e Slots Estáticos
+  const [isAdSlotModalOpen, setIsAdSlotModalOpen] = useState(false);
+  const [editingAdSlot, setEditingAdSlot] = useState<AdSlot | null>(null);
+  const [adSlotFormTitle, setAdSlotFormTitle] = useState('');
+  const [adSlotFormSubtitle, setAdSlotFormSubtitle] = useState('');
+  const [adSlotFormIsEnabled, setAdSlotFormIsEnabled] = useState(true);
+  const [adSlotFormType, setAdSlotFormType] = useState<AdContentType>('none');
+  const [adSlotFormImageUrl, setAdSlotFormImageUrl] = useState('');
+  const [adSlotFormTargetUrl, setAdSlotFormTargetUrl] = useState('');
+  const [adSlotFormAdvertiserName, setAdSlotFormAdvertiserName] = useState('');
+  const [adSlotFormAltText, setAdSlotFormAltText] = useState('');
+  const [adSlotFormOpenInNewTab, setAdSlotFormOpenInNewTab] = useState(true);
+  const [adSlotFormShowPlaceholderWhenEmpty, setAdSlotFormShowPlaceholderWhenEmpty] = useState(false);
+  const [adSlotFormCodeSnippet, setAdSlotFormCodeSnippet] = useState('');
+  const [isUploadingAdSlotImage, setIsUploadingAdSlotImage] = useState(false);
+  const [adSlotModalError, setAdSlotModalError] = useState<string | null>(null);
+  const [adSlotModalWarning, setAdSlotModalWarning] = useState<string | null>(null);
+  const [isSavingAdSlot, setIsSavingAdSlot] = useState(false);
+
   // Safely navigate between admin modules, ensuring all open modals are closed
   const handleSelectSection = (section: AdminSection) => {
     setIsPrerollModalOpen(false);
@@ -316,6 +396,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setIsFeaturedModalOpen(false);
     setIsChannelModalOpen(false);
     setIsPlanModalOpen(false);
+    setIsAdSlotModalOpen(false);
+    setEditingAdSlot(null);
     setEditingPrerollId(null);
     setPrerollError(null);
     setActiveSection(section);
@@ -409,8 +491,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       fetchAppearance();
     }
 
-    if (activeSection === 'settings' || activeSection === 'dashboard') {
+    if (activeSection === 'settings' || activeSection === 'channels' || activeSection === 'dashboard') {
       fetchSettings();
+      fetchAuthorizedIframeDomains();
     }
 
     if (activeSection === 'featured' || activeSection === 'dashboard') {
@@ -419,6 +502,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     if (activeSection === 'ads' || activeSection === 'dashboard') {
       fetchPrerollCampaigns();
+      fetchInPlaySettings();
+      fetchAdSlots();
     }
   }, [activeSection, currentAdmin]);
 
@@ -454,11 +539,137 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           if (data.allow_public_browse !== undefined) setTempAllowPublicBrowse(Boolean(data.allow_public_browse));
           if (data.max_simultaneous_streams !== undefined) setTempMaxSimultaneousStreams(data.max_simultaneous_streams);
           if (data.stream_relay_enabled !== undefined) setTempStreamRelayEnabled(Boolean(data.stream_relay_enabled));
+          if (data.default_home_tab) setTempDefaultHomeTab(data.default_home_tab);
         }
       }
     } catch (err) {
       console.warn('[Admin] Erro ao carregar configurações gerais:', err);
     }
+  };
+
+  // Fetch Persistent Authorized Iframe Domains from PostgreSQL
+  const fetchAuthorizedIframeDomains = async () => {
+    setIsLoadingAuthorizedDomains(true);
+    try {
+      const res = await fetch('/api/admin/iframe-domains', {
+        headers: getAuthHeaders(),
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.domains)) {
+          setAuthorizedDomainsList(data.domains.map((d: any) => ({
+            id: d.id,
+            domain: d.domain,
+            isActive: Boolean(d.is_active ?? d.isActive),
+            addedBy: d.added_by || d.addedBy || 'admin',
+            createdAt: d.created_at || d.createdAt || new Date().toISOString(),
+            updatedAt: d.updated_at || d.updatedAt || new Date().toISOString()
+          })));
+        }
+      }
+    } catch (err) {
+      console.warn('[Admin] Erro ao carregar domínios autorizados:', err);
+    } finally {
+      setIsLoadingAuthorizedDomains(false);
+    }
+  };
+
+  const handleAuthorizeDomain = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const rawInput = newAuthorizedDomainInput.trim();
+    if (!rawInput) {
+      triggerToast('Digite o domínio a ser autorizado.');
+      return;
+    }
+
+    setIsAuthorizingDomain(true);
+    try {
+      const res = await fetch('/api/admin/iframe-domains', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ domain: rawInput })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setNewAuthorizedDomainInput('');
+        triggerToast(`Domínio "${data.domain}" autorizado com sucesso no PostgreSQL!`);
+        await fetchAuthorizedIframeDomains();
+      } else {
+        triggerToast(data.error || 'Erro ao autorizar domínio.');
+      }
+    } catch (err) {
+      triggerToast('Erro de comunicação com o servidor ao autorizar domínio.');
+    } finally {
+      setIsAuthorizingDomain(false);
+    }
+  };
+
+  const handleToggleDomainActive = async (dom: AuthorizedIframeDomain) => {
+    setDomainActionLoadingId(dom.id);
+    try {
+      const res = await fetch(`/api/admin/iframe-domains/${dom.id}/toggle`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        credentials: 'include'
+      });
+
+      if (res.ok) {
+        const updated = await res.json();
+        const newStatus = Boolean(updated.is_active ?? !dom.isActive);
+        setAuthorizedDomainsList(prev =>
+          prev.map(d => d.id === dom.id ? { ...d, isActive: newStatus } : d)
+        );
+        triggerToast(`Domínio "${dom.domain}" ${newStatus ? 'ativado' : 'desativado'} com sucesso!`);
+      } else {
+        triggerToast('Erro ao alternar status do domínio.');
+      }
+    } catch (err) {
+      triggerToast('Erro de conexão ao alternar status do domínio.');
+    } finally {
+      setDomainActionLoadingId(null);
+    }
+  };
+
+  const handleDeleteDomain = async (dom: AuthorizedIframeDomain) => {
+    const confirmed = window.confirm(
+      `Deseja realmente remover o domínio "${dom.domain}" da lista de provedores autorizados?\n\nQualquer canal configurado com iframe deste domínio será bloqueado de imediato até que seja reautorizado.`
+    );
+    if (!confirmed) return;
+
+    setDomainActionLoadingId(dom.id);
+    try {
+      const res = await fetch(`/api/admin/iframe-domains/${dom.id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        credentials: 'include'
+      });
+
+      if (res.ok) {
+        setAuthorizedDomainsList(prev => prev.filter(d => d.id !== dom.id));
+        triggerToast(`Domínio "${dom.domain}" removido com sucesso.`);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        triggerToast(data.error || 'Erro ao remover domínio.');
+      }
+    } catch (err) {
+      triggerToast('Erro de conexão ao excluir domínio.');
+    } finally {
+      setDomainActionLoadingId(null);
+    }
+  };
+
+  const handleGoToAuthorizedDomains = () => {
+    setIsChannelModalOpen(false);
+    handleSelectSection('settings');
+    setTimeout(() => {
+      const sectionEl = document.getElementById('authorized-iframe-domains-section');
+      if (sectionEl) {
+        sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 200);
   };
 
   // Fetch Featured Highlights & Settings from backend / PostgreSQL
@@ -517,6 +728,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setFeatIsActive(item.is_active !== false);
     setFeatIsDemo(Boolean(item.is_demo));
     setIsFeaturedModalOpen(true);
+  };
+
+  const handleCreateHighlightFromFootballMatch = (match: FootballMatch) => {
+    setEditingFeaturedId(null);
+    setFeatTitle(`${match.homeTeamName} x ${match.awayTeamName}`);
+    setFeatDescription(
+      `${match.competition}${match.round ? ` • ${match.round}` : ''}${
+        match.description ? ` — ${match.description}` : ' — Transmissão Ao Vivo na Gato Net'
+      }`
+    );
+    setFeatImageUrl(match.homeTeamLogo || '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg');
+    setFeatTargetChannelId(match.primaryChannelId || match.channels[0]?.channelId || channels[0]?.id || 'ch_globo');
+    setFeatButtonText(match.status === 'live' ? 'Assistir Ao Vivo' : 'Assistir Partida');
+    setFeatTimeLabel(`${match.matchDate} às ${match.matchTime} (${match.timezone || 'BRT'})`);
+    setFeatStartDate('');
+    setFeatEndDate('');
+    setFeatPlacement('both');
+    setFeatDisplayOrder(featuredList.length + 1);
+    setFeatIsActive(true);
+    setFeatIsDemo(false);
+    setActiveSection('featured');
+    setIsFeaturedModalOpen(true);
+    triggerToast(`Partida "${match.homeTeamName} x ${match.awayTeamName}" carregada em Novo Destaque!`);
   };
 
   const handleSaveFeaturedItem = async (e: React.FormEvent) => {
@@ -691,6 +925,166 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       console.warn('[Admin] Erro ao carregar campanhas de pré-roll:', err);
     } finally {
       setIsLoadingPreroll(false);
+    }
+  };
+
+  // Fetch In-Play settings
+  const fetchInPlaySettings = async () => {
+    setIsLoadingInPlay(true);
+    try {
+      const res = await fetch('/api/admin/inplay', {
+        headers: getAuthHeaders(),
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setInplaySettings(data);
+        setInplayIsEnabled(Boolean(data.is_enabled));
+        setInplayAdFormat(data.ad_format || 'script');
+        setInplayAdScriptCode(data.ad_script_code || '');
+        setInplayBannerImageUrl(data.banner_image_url || '');
+        setInplayBannerTargetUrl(data.banner_target_url || '');
+        setInplayBannerTitle(data.banner_title || '');
+        setInplayPosition(data.position || 'bottom_center');
+        setInplayDelaySeconds(Number(data.delay_seconds) || 10);
+        setInplayIntervalMinutes(Number(data.interval_minutes) ?? 5);
+        setInplayDurationSeconds(Number(data.duration_seconds) || 15);
+        setInplayFadeOutSeconds(Number(data.fade_out_seconds) || 1.0);
+        setInplayCloseButtonEnabled(data.close_button_enabled !== false);
+        setInplayTargetType(data.target_type || 'all');
+        setInplayTargetChannelIds(Array.isArray(data.target_channel_ids) ? data.target_channel_ids : []);
+        setInplayTargetCategoryIds(Array.isArray(data.target_category_ids) ? data.target_category_ids : []);
+        setInplayExemptPlanIds(Array.isArray(data.exempt_plan_ids) ? data.exempt_plan_ids : ['plan_anual', 'plan_semestral']);
+      }
+    } catch (err) {
+      console.warn('[Admin] Erro ao carregar configurações do Banner In-Play:', err);
+    } finally {
+      setIsLoadingInPlay(false);
+    }
+  };
+
+  const handleSaveInPlay = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsSavingInPlay(true);
+    setInplayNoticeWarning(null);
+    setInplayErrorMessage(null);
+    setInplaySuccessMessage(null);
+
+    if (inplayDelaySeconds < 3) {
+      setInplayErrorMessage('O Delay inicial (Início do Banner) deve ser de no mínimo 3 segundos.');
+      setIsSavingInPlay(false);
+      return;
+    }
+    if (inplayDurationSeconds < 5) {
+      setInplayErrorMessage('A Duração em Tela deve ser de no mínimo 5 segundos.');
+      setIsSavingInPlay(false);
+      return;
+    }
+    if (inplayIntervalMinutes < 0) {
+      setInplayErrorMessage('O Intervalo Periódico deve ser igual ou superior a 0 minutos.');
+      setIsSavingInPlay(false);
+      return;
+    }
+    if (inplayFadeOutSeconds < 0.2 || inplayFadeOutSeconds > 5.0) {
+      setInplayErrorMessage('A duração do Fade-Out deve estar entre 0.2 e 5.0 segundos.');
+      setIsSavingInPlay(false);
+      return;
+    }
+    if (inplayAdFormat === 'script' && inplayIsEnabled && !inplayAdScriptCode.trim()) {
+      setInplayErrorMessage('Informe o Código do Script de Anúncio In-Play para salvar.');
+      setIsSavingInPlay(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/inplay', {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({
+          is_enabled: inplayIsEnabled,
+          ad_format: inplayAdFormat,
+          ad_script_code: inplayAdScriptCode,
+          banner_image_url: inplayBannerImageUrl || null,
+          banner_target_url: inplayBannerTargetUrl || null,
+          banner_title: inplayBannerTitle || null,
+          position: inplayPosition,
+          delay_seconds: inplayDelaySeconds,
+          interval_minutes: inplayIntervalMinutes,
+          duration_seconds: inplayDurationSeconds,
+          fade_out_seconds: inplayFadeOutSeconds,
+          close_button_enabled: inplayCloseButtonEnabled,
+          target_type: inplayTargetType,
+          target_channel_ids: inplayTargetChannelIds,
+          target_category_ids: inplayTargetCategoryIds,
+          exempt_plan_ids: inplayExemptPlanIds
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setInplaySettings(data);
+        if (data.warning) {
+          setInplayNoticeWarning(data.warning);
+        }
+        setInplaySuccessMessage('Configurações do Banner In-Play salvas com sucesso!');
+        triggerToast('Configurações do Banner In-Play atualizadas com sucesso!');
+      } else {
+        setInplayErrorMessage(data.error || 'Erro ao salvar configurações do Banner In-Play.');
+      }
+    } catch (err: any) {
+      setInplayErrorMessage('Falha na comunicação com o servidor ao salvar Banner In-Play.');
+    } finally {
+      setIsSavingInPlay(false);
+    }
+  };
+
+  const handleInplayImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setInplayErrorMessage('A imagem deve ter no máximo 5 MB.');
+      return;
+    }
+
+    setIsUploadingInplayImage(true);
+    setInplayErrorMessage(null);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64Data = reader.result as string;
+        try {
+          const res = await fetch('/api/admin/upload', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            credentials: 'include',
+            body: JSON.stringify({
+              filename: file.name,
+              mimeType: file.type || 'image/png',
+              base64Data,
+              target: 'featured'
+            })
+          });
+
+          const data = await res.json();
+          if (res.ok && data.url) {
+            setInplayBannerImageUrl(data.url);
+            triggerToast('Imagem do banner In-Play enviada com sucesso!');
+          } else {
+            setInplayErrorMessage(data.error || 'Falha ao processar upload da imagem.');
+          }
+        } catch (err) {
+          setInplayErrorMessage('Erro de conexão ao enviar imagem.');
+        } finally {
+          setIsUploadingInplayImage(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      setInplayErrorMessage('Erro ao carregar arquivo de imagem.');
+      setIsUploadingInplayImage(false);
     }
   };
 
@@ -1313,6 +1707,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             backupImage: c.backup_image_url || '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
             streamUrl: c.stream_url,
             alternativeStreams: c.alternative_streams || [],
+            playerType: c.player_type || 'internal',
+            iframeCode: c.iframe_code || '',
+            iframeUrl: c.iframe_url || '',
             resolution: c.resolution || '1080p',
             aspectRatio: c.aspect_ratio || '16:9',
             currentProgram: c.current_program || 'Transmissão Ao Vivo',
@@ -1338,6 +1735,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setChannelFormName('');
     setChannelFormCategory(categories.find(c => c.id !== 'cat_all')?.id || categories[0]?.id || 'cat_aberta');
     setChannelFormLogo('');
+    setChannelFormPlayerType('internal');
+    setChannelFormIframeCode('');
+    setChannelFormIframeTestUrl('');
+    setIframeValidationNotice(null);
     setChannelFormStreamUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
     setChannelFormAltStreams([]);
     setChannelFormResolution('1080p');
@@ -1356,6 +1757,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setChannelFormName(ch.name);
     setChannelFormCategory(ch.categoryId);
     setChannelFormLogo(ch.logo || '');
+    setChannelFormPlayerType(ch.playerType || 'internal');
+    setChannelFormIframeCode(ch.iframeCode || '');
+    setChannelFormIframeTestUrl(ch.iframeUrl || '');
+    setIframeValidationNotice(null);
     setChannelFormStreamUrl(ch.streamUrl);
     setChannelFormAltStreams(
       (ch.alternativeStreams || []).map((alt: any, idx: number) => {
@@ -1379,11 +1784,66 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setIsChannelModalOpen(true);
   };
 
+  const handleValidateAndTestIframe = async () => {
+    if (!channelFormIframeCode.trim()) {
+      setIframeValidationNotice({
+        type: 'error',
+        message: 'Insira o código HTML da tag <iframe> ou URL HTTPS para validação.'
+      });
+      return;
+    }
+
+    setIsValidatingIframe(true);
+    setIframeValidationNotice(null);
+    try {
+      const res = await fetch('/api/admin/channels/validate-iframe', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ iframeCode: channelFormIframeCode })
+      });
+      const data = await res.json();
+      if (res.ok && data.valid) {
+        setChannelFormIframeTestUrl(data.safeUrl);
+        setIframeValidationNotice({
+          type: 'success',
+          message: `Iframe validado com sucesso! Domínio autorizado: "${data.domain}".`,
+          safeUrl: data.safeUrl
+        });
+      } else {
+        setChannelFormIframeTestUrl('');
+        setIframeValidationNotice({
+          type: 'error',
+          message: data.error || 'Código de incorporação inválido ou domínio não autorizado.'
+        });
+      }
+    } catch (err: any) {
+      setIframeValidationNotice({
+        type: 'error',
+        message: 'Falha na comunicação com o servidor ao validar iframe.'
+      });
+    } finally {
+      setIsValidatingIframe(false);
+    }
+  };
+
   const handleSaveChannel = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!channelFormName.trim() || !channelFormStreamUrl.trim()) {
-      setChannelFormError('Nome e URL Principal da transmissão são obrigatórios.');
+    if (!channelFormName.trim()) {
+      setChannelFormError('Nome do canal é obrigatório.');
       return;
+    }
+
+    if (channelFormPlayerType === 'external_iframe') {
+      if (!channelFormIframeCode.trim()) {
+        setChannelFormError('Código HTML do iframe é obrigatório quando a opção Player Externo está selecionada.');
+        return;
+      }
+    } else {
+      if (!channelFormStreamUrl.trim()) {
+        setChannelFormError('URL Principal da transmissão é obrigatória para o Player Interno.');
+        return;
+      }
     }
 
     setIsSavingChannel(true);
@@ -1394,7 +1854,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       name: channelFormName.trim(),
       category_id: channelFormCategory,
       logo_url: channelFormLogo.trim() || 'https://images.unsplash.com/photo-1598899134739-24c46f58b8c0?auto=format&fit=crop&w=160&q=80',
-      stream_url: channelFormStreamUrl.trim(),
+      player_type: channelFormPlayerType,
+      iframe_code: channelFormPlayerType === 'external_iframe' ? channelFormIframeCode.trim() : null,
+      stream_url: channelFormStreamUrl.trim() || (channelFormPlayerType === 'external_iframe' ? (channelFormIframeTestUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4') : ''),
       alternative_streams: channelFormAltStreams.filter(a => a.url.trim().length > 0),
       resolution: channelFormResolution,
       aspect_ratio: channelFormAspectRatio,
@@ -1544,7 +2006,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
 
-  // Toggle Ad Slot
+  // Fetch Ad Slots from server / PostgreSQL
+  const fetchAdSlots = async () => {
+    try {
+      const res = await fetch('/api/admin/ads', { headers: getAuthHeaders(), credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setAdSlots(
+            data.map((ad: any) => ({
+              id: ad.id,
+              slotType: ad.slot_type,
+              title: ad.title,
+              subtitle: ad.subtitle,
+              imageUrl: ad.image_url || '',
+              targetUrl: ad.target_url || '',
+              dimensions: ad.dimensions,
+              codeSnippet: ad.code_snippet || '',
+              isEnabled: Boolean(ad.is_enabled),
+              adType: ad.ad_type || (ad.image_url ? 'image_url' : (ad.code_snippet ? 'code_script' : 'none')),
+              advertiserName: ad.advertiser_name || '',
+              altText: ad.alt_text || '',
+              openInNewTab: ad.open_in_new_tab !== undefined ? Boolean(ad.open_in_new_tab) : true,
+              showPlaceholderWhenEmpty: ad.show_placeholder_when_empty !== undefined ? Boolean(ad.show_placeholder_when_empty) : false,
+              createdAt: ad.created_at,
+              updatedAt: ad.updated_at
+            }))
+          );
+        }
+      }
+    } catch (e) {
+      console.warn('[Admin] Erro ao carregar slots de anúncio:', e);
+    }
+  };
+
+  // Toggle Ad Slot quick enable/disable
   const handleToggleAdSlot = async (slotId: string) => {
     const targetSlot = adSlots.find(a => a.id === slotId);
     if (!targetSlot) return;
@@ -1561,10 +2057,259 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         setAdSlots(prev =>
           prev.map(slot => slot.id === slotId ? { ...slot, isEnabled: !slot.isEnabled } : slot)
         );
-        triggerToast('Configuração de anúncio salva no servidor.');
+        triggerToast(`Espaço "${targetSlot.title}" ${!targetSlot.isEnabled ? 'ativado' : 'desativado'} com sucesso!`);
       }
     } catch (err) {
       triggerToast('Erro ao salvar alteração de anúncio.');
+    }
+  };
+
+  // Open "Gerenciar Banner" Modal prefilled with slot configurations
+  const handleOpenManageAdSlot = (slot: AdSlot) => {
+    setEditingAdSlot(slot);
+    setAdSlotFormTitle(slot.title);
+    setAdSlotFormSubtitle(slot.subtitle || '');
+    setAdSlotFormIsEnabled(slot.isEnabled);
+
+    // Determine current adType
+    let currentType: AdContentType = 'none';
+    if (slot.adType && ['none', 'image_upload', 'image_url', 'code_script'].includes(slot.adType)) {
+      currentType = slot.adType;
+    } else if (slot.imageUrl && slot.imageUrl.trim() !== '' && slot.imageUrl !== '#') {
+      currentType = slot.imageUrl.startsWith('/uploads/') ? 'image_upload' : 'image_url';
+    } else if (slot.codeSnippet && slot.codeSnippet.trim() !== '' && !slot.codeSnippet.startsWith('<!-- Espaço reservado')) {
+      currentType = 'code_script';
+    }
+
+    setAdSlotFormType(currentType);
+    setAdSlotFormImageUrl(slot.imageUrl && slot.imageUrl !== '#' ? slot.imageUrl : '');
+    setAdSlotFormTargetUrl(slot.targetUrl && slot.targetUrl !== '#' ? slot.targetUrl : '');
+    setAdSlotFormAdvertiserName(slot.advertiserName || '');
+    setAdSlotFormAltText(slot.altText || '');
+    setAdSlotFormOpenInNewTab(slot.openInNewTab !== undefined ? slot.openInNewTab : true);
+    setAdSlotFormShowPlaceholderWhenEmpty(slot.showPlaceholderWhenEmpty !== undefined ? slot.showPlaceholderWhenEmpty : false);
+    setAdSlotFormCodeSnippet(
+      slot.codeSnippet && !slot.codeSnippet.startsWith('<!-- Espaço reservado') ? slot.codeSnippet : ''
+    );
+    setAdSlotModalError(null);
+    setAdSlotModalWarning(null);
+    setIsAdSlotModalOpen(true);
+  };
+
+  // Upload image handler for static ad slots
+  const handleAdSlotImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate type (JPG, PNG, WebP)
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      setAdSlotModalError('Formato de arquivo não suportado. Por favor, envie uma imagem JPG, PNG ou WebP.');
+      return;
+    }
+
+    // Validate size (max 5 MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setAdSlotModalError(`O arquivo é muito grande (${(file.size / (1024 * 1024)).toFixed(2)} MB). O limite máximo permitido é de 5 MB.`);
+      return;
+    }
+
+    setIsUploadingAdSlotImage(true);
+    setAdSlotModalError(null);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64Data = reader.result as string;
+
+        try {
+          const res = await fetch('/api/admin/upload', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            credentials: 'include',
+            body: JSON.stringify({
+              filename: file.name,
+              mimeType: file.type,
+              base64Data,
+              target: 'banner'
+            })
+          });
+
+          const data = await res.json();
+          if (res.ok && data.url) {
+            setAdSlotFormImageUrl(data.url);
+            setAdSlotFormType('image_upload');
+            triggerToast('Upload da imagem do banner concluído com sucesso!');
+          } else {
+            setAdSlotModalError(data.error || 'Falha ao processar upload da imagem no servidor.');
+          }
+        } catch (err: any) {
+          setAdSlotModalError('Erro de conexão ao enviar imagem para o servidor.');
+        } finally {
+          setIsUploadingAdSlotImage(false);
+        }
+      };
+      reader.onerror = () => {
+        setAdSlotModalError('Erro ao ler arquivo no dispositivo local.');
+        setIsUploadingAdSlotImage(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      setAdSlotModalError('Erro inesperado no envio da imagem.');
+      setIsUploadingAdSlotImage(false);
+    }
+  };
+
+  // Save Ad Slot Handler
+  const handleSaveAdSlot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAdSlot) return;
+
+    setAdSlotModalError(null);
+    setAdSlotModalWarning(null);
+
+    // Validate based on selected type
+    if (adSlotFormType === 'image_upload' && !adSlotFormImageUrl.trim()) {
+      setAdSlotModalError('Selecione ou envie uma imagem válida para utilizar a Opção A (Upload de Imagem).');
+      return;
+    }
+
+    if (adSlotFormType === 'image_url') {
+      const trimmedUrl = adSlotFormImageUrl.trim();
+      if (!trimmedUrl) {
+        setAdSlotModalError('Informe o endereço da imagem para utilizar a Opção B (URL de Imagem).');
+        return;
+      }
+      if (!trimmedUrl.startsWith('https://') && !trimmedUrl.startsWith('/uploads/')) {
+        setAdSlotModalError('Por segurança, a URL da imagem deve utilizar protocolo seguro HTTPS (ex: https://dominio.com/banner.png).');
+        return;
+      }
+    }
+
+    if (adSlotFormType === 'code_script') {
+      if (!adSlotFormCodeSnippet.trim()) {
+        setAdSlotModalError('Informe o Código do Script de Anúncio para a Opção C.');
+        return;
+      }
+    }
+
+    if (adSlotFormTargetUrl.trim()) {
+      const trimmedTarget = adSlotFormTargetUrl.trim();
+      if (trimmedTarget !== '#' && !trimmedTarget.startsWith('http://') && !trimmedTarget.startsWith('https://')) {
+        setAdSlotModalError('A URL de destino ao clicar deve iniciar com http:// ou https://');
+        return;
+      }
+    }
+
+    setIsSavingAdSlot(true);
+    try {
+      const payload = {
+        title: adSlotFormTitle.trim(),
+        subtitle: adSlotFormSubtitle.trim(),
+        is_enabled: adSlotFormIsEnabled,
+        ad_type: adSlotFormType,
+        image_url: adSlotFormType === 'image_upload' || adSlotFormType === 'image_url' ? adSlotFormImageUrl.trim() : null,
+        target_url: adSlotFormTargetUrl.trim(),
+        code_snippet: adSlotFormType === 'code_script' ? adSlotFormCodeSnippet.trim() : null,
+        advertiser_name: adSlotFormAdvertiserName.trim() || null,
+        alt_text: adSlotFormAltText.trim() || null,
+        open_in_new_tab: adSlotFormOpenInNewTab,
+        show_placeholder_when_empty: adSlotFormShowPlaceholderWhenEmpty
+      };
+
+      const res = await fetch(`/api/admin/ads/${editingAdSlot.id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setAdSlots(prev =>
+          prev.map(s =>
+            s.id === editingAdSlot.id
+              ? {
+                  ...s,
+                  title: data.title || payload.title,
+                  subtitle: data.subtitle || payload.subtitle,
+                  isEnabled: data.is_enabled,
+                  adType: data.ad_type,
+                  imageUrl: data.image_url || '',
+                  targetUrl: data.target_url || '',
+                  codeSnippet: data.code_snippet || '',
+                  advertiserName: data.advertiser_name || '',
+                  altText: data.alt_text || '',
+                  openInNewTab: data.open_in_new_tab !== undefined ? data.open_in_new_tab : true,
+                  showPlaceholderWhenEmpty: data.show_placeholder_when_empty !== undefined ? data.show_placeholder_when_empty : false
+                }
+              : s
+          )
+        );
+
+        if (data.warning) {
+          setAdSlotModalWarning(data.warning);
+          triggerToast('Banner salvo no PostgreSQL com aviso de compatibilidade.');
+        } else {
+          triggerToast(`Configurações do espaço "${editingAdSlot.title}" salvas com sucesso!`);
+          setIsAdSlotModalOpen(false);
+          setEditingAdSlot(null);
+        }
+      } else {
+        setAdSlotModalError(data.error || 'Erro ao salvar configurações do banner.');
+      }
+    } catch (err: any) {
+      setAdSlotModalError('Erro de conexão ao salvar espaço publicitário.');
+    } finally {
+      setIsSavingAdSlot(false);
+    }
+  };
+
+  // Remove ad content from slot (reverts to empty state)
+  const handleRemoveAdFromSlot = async () => {
+    if (!editingAdSlot) return;
+    const confirmRemove = window.confirm(
+      `Deseja realmente remover o conteúdo publicitário do espaço "${editingAdSlot.title}"?\n\nO espaço publicitário será mantido na plataforma e retornará para o estado sem anúncio cadastrado.`
+    );
+    if (!confirmRemove) return;
+
+    setIsSavingAdSlot(true);
+    setAdSlotModalError(null);
+    try {
+      const res = await fetch(`/api/admin/ads/${editingAdSlot.id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ action: 'remove_ad' })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setAdSlots(prev =>
+          prev.map(s =>
+            s.id === editingAdSlot.id
+              ? {
+                  ...s,
+                  adType: 'none',
+                  imageUrl: '',
+                  targetUrl: '',
+                  codeSnippet: '',
+                  advertiserName: '',
+                  altText: ''
+                }
+              : s
+          )
+        );
+        triggerToast(`Anúncio removido do espaço "${editingAdSlot.title}".`);
+        setIsAdSlotModalOpen(false);
+        setEditingAdSlot(null);
+      } else {
+        setAdSlotModalError(data.error || 'Erro ao remover anúncio do espaço.');
+      }
+    } catch (err) {
+      setAdSlotModalError('Erro de conexão ao remover anúncio.');
+    } finally {
+      setIsSavingAdSlot(false);
     }
   };
 
@@ -1613,7 +2358,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Save General Settings & Access Modes (Modos 1, 2, 3, navegação pública, telas simultâneas, relay)
+  // Save General Settings & Access Modes (Modos 1, 2, 3, navegação pública, telas simultâneas, relay, domínios iframe)
   const handleSaveGeneralSettings = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setIsSavingGeneralSettings(true);
@@ -1626,9 +2371,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           current_mode: tempAccessMode,
           allow_public_browse: tempAllowPublicBrowse,
           max_simultaneous_streams: tempMaxSimultaneousStreams,
-          stream_relay_enabled: tempStreamRelayEnabled
+          stream_relay_enabled: tempStreamRelayEnabled,
+          default_home_tab: tempDefaultHomeTab
         })
       });
+
+      // Also persist allowed iframe domains
+      await fetch('/api/admin/iframe-domains', {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({
+          allowedIframeDomains: tempIframeDomains
+        })
+      }).catch(() => {});
 
       const data = await res.json().catch(() => ({}));
 
@@ -1638,9 +2394,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           accessMode: data.current_mode || tempAccessMode,
           allowPublicChannelBrowse: data.allow_public_browse !== undefined ? data.allow_public_browse : tempAllowPublicBrowse,
           maxSimultaneousStreams: data.max_simultaneous_streams || tempMaxSimultaneousStreams,
-          streamRelayEnabled: data.stream_relay_enabled !== undefined ? data.stream_relay_enabled : tempStreamRelayEnabled
+          streamRelayEnabled: data.stream_relay_enabled !== undefined ? data.stream_relay_enabled : tempStreamRelayEnabled,
+          defaultHomeTab: data.default_home_tab || tempDefaultHomeTab,
+          allowedIframeDomains: tempIframeDomains
         }));
-        triggerToast(`Configurações gerais e modo de acesso salvos! Modo ativo: ${tempAccessMode === 'free' ? 'Modo 1 - Gratuito' : tempAccessMode === 'free_registered' ? 'Modo 2 - Cadastro' : 'Modo 3 - Assinatura'}`);
+        triggerToast(`Configurações gerais e domínios de iframe salvos com sucesso! Modo ativo: ${tempAccessMode === 'free' ? 'Modo 1 - Gratuito' : tempAccessMode === 'free_registered' ? 'Modo 2 - Cadastro' : 'Modo 3 - Assinatura'}`);
       } else {
         triggerToast(data.error || 'Erro ao salvar configurações gerais.');
       }
@@ -1772,6 +2530,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     { id: 'settings', label: '11. Configurações Gerais', icon: Sliders },
     { id: 'security', label: '12. Segurança e Backups', icon: ShieldAlert },
     { id: 'featured', label: '13. Destaques da Programação', icon: Sparkles },
+    { id: 'football', label: '14. Agenda de Futebol', icon: Trophy },
   ];
 
   return (
@@ -2097,6 +2856,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   <span className="text-[11px] text-slate-400 block truncate max-w-xs">
                                     {ch.description || ch.currentProgram || 'Sem descrição'}
                                   </span>
+                                  {ch.playerType === 'external_iframe' ? (
+                                    <div className="mt-1 flex items-center gap-1">
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-950/90 text-cyan-300 border border-cyan-500/40">
+                                        <Globe className="w-2.5 h-2.5" />
+                                        Player Externo (iframe)
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <div className="mt-0.5">
+                                      <span className="text-[10px] text-slate-400 font-mono">Player Interno</span>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </td>
@@ -2108,18 +2879,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                             {/* Fontes */}
                             <td className="py-3 px-4 font-mono text-[11px]">
-                              <div className="max-w-[220px] truncate text-blue-300" title={ch.streamUrl}>
-                                {ch.streamUrl}
-                              </div>
-                              <span className="text-[10px] text-slate-400">
-                                {altsCount > 0 ? (
-                                  <span className="text-emerald-400 font-bold">
-                                    +{altsCount} fonte(s) reserva
+                              {ch.playerType === 'external_iframe' ? (
+                                <div>
+                                  <div className="max-w-[220px] truncate text-cyan-300 font-medium" title={ch.iframeUrl || ''}>
+                                    {ch.iframeUrl || 'Iframe configurado'}
+                                  </div>
+                                  <span className="text-[10px] text-cyan-400/80 block">
+                                    Incorporação externa autorizada
                                   </span>
-                                ) : (
-                                  'Sem fonte reserva'
-                                )}
-                              </span>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="max-w-[220px] truncate text-blue-300" title={ch.streamUrl}>
+                                    {ch.streamUrl}
+                                  </div>
+                                  <span className="text-[10px] text-slate-400">
+                                    {altsCount > 0 ? (
+                                      <span className="text-emerald-400 font-bold">
+                                        +{altsCount} fonte(s) reserva
+                                      </span>
+                                    ) : (
+                                      'Sem fonte reserva'
+                                    )}
+                                  </span>
+                                </>
+                              )}
                             </td>
 
                             {/* Status */}
@@ -2211,9 +2995,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </div>
 
                     {channelFormError && (
-                      <div className="p-3 rounded-xl bg-red-950/80 border border-red-500/40 text-red-200 text-xs flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-                        <span>{channelFormError}</span>
+                      <div className="p-3.5 rounded-xl bg-red-950/80 border border-red-500/50 text-red-200 text-xs flex flex-col gap-2.5">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                          <span className="flex-1 leading-relaxed">{channelFormError}</span>
+                        </div>
+                        {(channelFormPlayerType === 'external_iframe' || channelFormError.toLowerCase().includes('domínio') || channelFormError.toLowerCase().includes('iframe') || channelFormError.toLowerCase().includes('autorizado')) && (
+                          <div className="pt-2 border-t border-red-500/30 flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-[11px] text-red-300">
+                              Deseja liberar este domínio nas configurações do sistema?
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleGoToAuthorizedDomains}
+                              className="px-3 py-1.5 rounded-lg bg-red-800 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors shadow"
+                            >
+                              <Globe className="w-3.5 h-3.5" />
+                              <span>Ir para Domínios Autorizados (Módulo 11)</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -2319,126 +3120,349 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </div>
                       </div>
 
-                      {/* Linha 3: URL Principal da Transmissão */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="block text-xs font-medium text-slate-300">
-                            URL Principal da Transmissão *
-                          </label>
-                          <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
-                            <ShieldCheck className="w-3 h-3" />
-                            Proteção Anti-SSRF Ativa
-                          </span>
-                        </div>
-                        <input
-                          type="text"
-                          required
-                          placeholder="https://servidor.stream.com/live/canal.m3u8"
-                          value={channelFormStreamUrl}
-                          onChange={(e) => setChannelFormStreamUrl(e.target.value)}
-                          className="w-full px-3 py-2 text-xs font-mono rounded-lg bg-[#060911] border border-slate-700 text-white focus:outline-none focus:border-blue-500"
-                        />
-                        <p className="text-[10px] text-slate-400 mt-1">
-                          Protocolos aceitos: http, https, rtmp, rtmps, hls, udp. Hosts locais e redes privadas são bloqueados contra SSRF.
-                        </p>
-                      </div>
-
-                      {/* Linha 4: URLs Reservas com Prioridade */}
-                      <div className="p-3.5 rounded-xl bg-[#060911] border border-slate-800 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="text-xs font-bold text-white block">URLs Reservas (Failover de Fontes)</span>
-                            <span className="text-[10px] text-slate-400">Adicione rotas alternativas com prioridade de fallback</span>
-                          </div>
+                      {/* Tipo de Player Selector */}
+                      <div className="p-3.5 rounded-xl bg-[#060911] border border-blue-900/40 space-y-3">
+                        <label className="block text-xs font-bold text-white">
+                          Tipo de Player *
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <button
                             type="button"
                             onClick={() => {
-                              const nextPrio = channelFormAltStreams.length + 1;
-                              setChannelFormAltStreams(prev => [
-                                ...prev,
-                                { url: '', priority: nextPrio, label: `Fonte Reserva ${nextPrio}` }
-                              ]);
+                              setChannelFormPlayerType('internal');
+                              setChannelFormError(null);
                             }}
-                            className="px-2.5 py-1 rounded-lg bg-blue-950 text-blue-300 hover:bg-blue-900 border border-blue-700/60 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                              channelFormPlayerType === 'internal'
+                                ? 'bg-blue-950/60 border-blue-500 ring-1 ring-blue-500/40 text-white shadow-md'
+                                : 'bg-[#080d1a] border-slate-800 text-slate-300 hover:border-slate-700'
+                            }`}
                           >
-                            <Plus className="w-3 h-3" />
-                            <span>Adicionar Reserva</span>
+                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+                              channelFormPlayerType === 'internal' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              <Tv className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <span className="font-bold text-xs block text-white">Player Interno</span>
+                              <span className="text-[11px] text-slate-400 block mt-0.5 leading-tight">
+                                HLS (.m3u8), MP4 e formatos diretos de streaming.
+                              </span>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setChannelFormPlayerType('external_iframe');
+                              setChannelFormError(null);
+                            }}
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                              channelFormPlayerType === 'external_iframe'
+                                ? 'bg-cyan-950/60 border-cyan-500 ring-1 ring-cyan-500/40 text-white shadow-md'
+                                : 'bg-[#080d1a] border-slate-800 text-slate-300 hover:border-slate-700'
+                            }`}
+                          >
+                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+                              channelFormPlayerType === 'external_iframe' ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              <Globe className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <span className="font-bold text-xs block text-white">Player Externo (iframe)</span>
+                              <span className="text-[11px] text-slate-400 block mt-0.5 leading-tight">
+                                Incorporação via tag &lt;iframe&gt; de provedor autorizado.
+                              </span>
+                            </div>
                           </button>
                         </div>
+                      </div>
 
-                        {channelFormAltStreams.length > 0 ? (
-                          <div className="space-y-2">
-                            {channelFormAltStreams.map((alt, idx) => (
-                              <div key={idx} className="flex items-center gap-2">
-                                <div className="w-20">
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    value={alt.priority}
-                                    title="Prioridade"
-                                    placeholder="Prioridade"
-                                    onChange={(e) => {
-                                      const val = parseInt(e.target.value, 10) || 1;
-                                      setChannelFormAltStreams(prev => {
-                                        const clone = [...prev];
-                                        clone[idx] = { ...clone[idx], priority: val };
-                                        return clone;
-                                      });
-                                    }}
-                                    className="w-full px-2 py-1.5 text-xs font-mono rounded-lg bg-slate-900 border border-slate-700 text-white text-center"
-                                  />
-                                </div>
-                                <div className="w-32">
-                                  <input
-                                    type="text"
-                                    placeholder="Rótulo"
-                                    value={alt.label}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setChannelFormAltStreams(prev => {
-                                        const clone = [...prev];
-                                        clone[idx] = { ...clone[idx], label: val };
-                                        return clone;
-                                      });
-                                    }}
-                                    className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-900 border border-slate-700 text-white"
-                                  />
-                                </div>
-                                <div className="flex-1">
-                                  <input
-                                    type="text"
-                                    placeholder="https://... URL reserva"
-                                    value={alt.url}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setChannelFormAltStreams(prev => {
-                                        const clone = [...prev];
-                                        clone[idx] = { ...clone[idx], url: val };
-                                        return clone;
-                                      });
-                                    }}
-                                    className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-slate-900 border border-slate-700 text-white"
-                                  />
-                                </div>
+                      {/* BLOC 1: QUANDO PLAYER INTERNO FOR SELECIONADO */}
+                      {channelFormPlayerType === 'internal' && (
+                        <>
+                          {/* URL Principal da Transmissão */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-xs font-medium text-slate-300">
+                                URL Principal da Transmissão (Player Interno) *
+                              </label>
+                              <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
+                                <ShieldCheck className="w-3 h-3" />
+                                Proteção Anti-SSRF Ativa
+                              </span>
+                            </div>
+                            <input
+                              type="text"
+                              required={channelFormPlayerType === 'internal'}
+                              placeholder="https://servidor.stream.com/live/canal.m3u8"
+                              value={channelFormStreamUrl}
+                              onChange={(e) => setChannelFormStreamUrl(e.target.value)}
+                              className="w-full px-3 py-2 text-xs font-mono rounded-lg bg-[#060911] border border-slate-700 text-white focus:outline-none focus:border-blue-500"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">
+                              Protocolos aceitos: http, https, rtmp, rtmps, hls, udp. Hosts locais e redes privadas são bloqueados contra SSRF.
+                            </p>
+                          </div>
+
+                          {/* URLs Reservas com Prioridade */}
+                          <div className="p-3.5 rounded-xl bg-[#060911] border border-slate-800 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <span className="text-xs font-bold text-white block">URLs Reservas (Failover de Fontes)</span>
+                                <span className="text-[10px] text-slate-400">Adicione rotas alternativas com prioridade de fallback</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nextPrio = channelFormAltStreams.length + 1;
+                                  setChannelFormAltStreams(prev => [
+                                    ...prev,
+                                    { url: '', priority: nextPrio, label: `Fonte Reserva ${nextPrio}` }
+                                  ]);
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-blue-950 text-blue-300 hover:bg-blue-900 border border-blue-700/60 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>Adicionar Reserva</span>
+                              </button>
+                            </div>
+
+                            {channelFormAltStreams.length > 0 ? (
+                              <div className="space-y-2">
+                                {channelFormAltStreams.map((alt, idx) => (
+                                  <div key={idx} className="flex items-center gap-2">
+                                    <div className="w-20">
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        value={alt.priority}
+                                        title="Prioridade"
+                                        placeholder="Prioridade"
+                                        onChange={(e) => {
+                                          const val = parseInt(e.target.value, 10) || 1;
+                                          setChannelFormAltStreams(prev => {
+                                            const clone = [...prev];
+                                            clone[idx] = { ...clone[idx], priority: val };
+                                            return clone;
+                                          });
+                                        }}
+                                        className="w-full px-2 py-1.5 text-xs font-mono rounded-lg bg-slate-900 border border-slate-700 text-white text-center"
+                                      />
+                                    </div>
+                                    <div className="w-32">
+                                      <input
+                                        type="text"
+                                        placeholder="Rótulo"
+                                        value={alt.label}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setChannelFormAltStreams(prev => {
+                                            const clone = [...prev];
+                                            clone[idx] = { ...clone[idx], label: val };
+                                            return clone;
+                                          });
+                                        }}
+                                        className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-900 border border-slate-700 text-white"
+                                      />
+                                    </div>
+                                    <div className="flex-1">
+                                      <input
+                                        type="text"
+                                        placeholder="https://... URL reserva"
+                                        value={alt.url}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setChannelFormAltStreams(prev => {
+                                            const clone = [...prev];
+                                            clone[idx] = { ...clone[idx], url: val };
+                                            return clone;
+                                          });
+                                        }}
+                                        className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-slate-900 border border-slate-700 text-white"
+                                      />
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setChannelFormAltStreams(prev => prev.filter((_, i) => i !== idx));
+                                      }}
+                                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-950/40 cursor-pointer"
+                                      title="Remover fonte reserva"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-500 block italic">
+                                Nenhuma URL reserva cadastrada. Clique no botão acima para adicionar caso queira contingência.
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {/* BLOC 2: QUANDO PLAYER EXTERNO (IFRAME) FOR SELECIONADO */}
+                      {channelFormPlayerType === 'external_iframe' && (
+                        <div className="p-4 rounded-xl bg-[#060911] border border-cyan-900/50 space-y-3.5">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                            <div>
+                              <label className="block text-xs font-bold text-white flex items-center gap-1.5">
+                                <Globe className="w-3.5 h-3.5 text-cyan-400" />
+                                <span>Código HTML do iframe *</span>
+                              </label>
+                              <span className="text-[11px] text-slate-400">
+                                Cole o código de incorporação (&lt;iframe&gt;) fornecido por um serviço de transmissão autorizado ou a URL de incorporação direta (HTTPS).
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950/70 border border-cyan-500/30 px-2 py-0.5 rounded self-start sm:self-auto">
+                              Filtro Anti-XSS Ativo
+                            </span>
+                          </div>
+
+                          {/* Textarea for iframe code */}
+                          <div className="space-y-1.5">
+                            <textarea
+                              rows={4}
+                              value={channelFormIframeCode}
+                              onChange={(e) => {
+                                setChannelFormIframeCode(e.target.value);
+                                setIframeValidationNotice(null);
+                              }}
+                              placeholder='Exemplo: <iframe src="https://player.vimeo.com/video/76979871" allow="autoplay; fullscreen" allowfullscreen></iframe>'
+                              className="w-full p-3 text-xs font-mono rounded-lg bg-[#090e1c] border border-slate-700 text-cyan-100 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+                            />
+                            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                              <div className="flex items-center gap-2">
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setChannelFormAltStreams(prev => prev.filter((_, i) => i !== idx));
-                                  }}
-                                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-950/40 cursor-pointer"
-                                  title="Remover fonte reserva"
+                                  onClick={handleValidateAndTestIframe}
+                                  disabled={isValidatingIframe || !channelFormIframeCode.trim()}
+                                  className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors shadow"
                                 >
-                                  <X className="w-3.5 h-3.5" />
+                                  {isValidatingIframe ? (
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                  )}
+                                  <span>{isValidatingIframe ? 'Validando...' : 'Validar e Testar Iframe'}</span>
+                                </button>
+
+                                {channelFormIframeCode && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setChannelFormIframeCode('');
+                                      setChannelFormIframeTestUrl('');
+                                      setIframeValidationNotice(null);
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium cursor-pointer transition-colors"
+                                  >
+                                    Limpar / Remover
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-400 hidden sm:inline">
+                                  Domínios liberados: YouTube, Vimeo, Cloudflare, Twitch e autorizados.
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={handleGoToAuthorizedDomains}
+                                  className="text-[11px] text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1 cursor-pointer transition-colors"
+                                  title="Ir para gerenciamento de domínios autorizados"
+                                >
+                                  <Globe className="w-3 h-3" />
+                                  <span>Gerenciar Domínios Autorizados</span>
                                 </button>
                               </div>
-                            ))}
+                            </div>
                           </div>
-                        ) : (
-                          <span className="text-[11px] text-slate-500 block italic">
-                            Nenhuma URL reserva cadastrada. Clique no botão acima para adicionar caso queira contingência.
-                          </span>
-                        )}
-                      </div>
+
+                          {/* Security Info Banner */}
+                          <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] text-slate-300 space-y-1">
+                            <div className="flex items-center gap-1.5 text-blue-300 font-semibold">
+                              <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                              <span>Segurança Rígida de Incorporação:</span>
+                            </div>
+                            <p className="text-slate-400 leading-relaxed">
+                              O sistema aceita exclusivamente elementos <code>&lt;iframe&gt;</code> válidos com protocolo HTTPS. Scripts executáveis arbitrários (&lt;script&gt;) e HTML livre são estritamente rejeitados pelo servidor. A renderização é realizada de forma nativa e isolada (sem <code>dangerouslySetInnerHTML</code>).
+                            </p>
+                          </div>
+
+                          {/* Validation Notice Feedback */}
+                          {iframeValidationNotice && (
+                            <div
+                              className={`p-3.5 rounded-xl text-xs flex flex-col gap-2 ${
+                                iframeValidationNotice.type === 'success'
+                                  ? 'bg-emerald-950/80 border border-emerald-500/50 text-emerald-200'
+                                  : 'bg-red-950/80 border border-red-500/50 text-red-200'
+                              }`}
+                            >
+                              <div className="flex items-start gap-2.5">
+                                {iframeValidationNotice.type === 'success' ? (
+                                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                                ) : (
+                                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                                )}
+                                <div className="flex-1">
+                                  <span className="font-semibold block leading-relaxed">{iframeValidationNotice.message}</span>
+                                  {iframeValidationNotice.safeUrl && (
+                                    <span className="text-[11px] font-mono text-emerald-300 mt-0.5 block truncate max-w-lg">
+                                      URL de origem validada: {iframeValidationNotice.safeUrl}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              {iframeValidationNotice.type === 'error' && (
+                                <div className="pt-2 border-t border-red-500/30 flex flex-wrap items-center justify-between gap-2">
+                                  <span className="text-[11px] text-red-300">
+                                    Provedor bloqueado ou não consta na lista de autorizados?
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={handleGoToAuthorizedDomains}
+                                    className="px-3 py-1.5 rounded-lg bg-red-800 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors shadow"
+                                  >
+                                    <Globe className="w-3.5 h-3.5" />
+                                    <span>Ir para Domínios Autorizados (Módulo 11)</span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* LIVE PREVIEW BOX */}
+                          {(channelFormIframeTestUrl || (editingChannelId && channelFormIframeCode && channelFormPlayerType === 'external_iframe')) && (
+                            <div className="p-3.5 rounded-xl bg-black border border-cyan-500/30 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                                  <Play className="w-3 h-3 text-cyan-400" />
+                                  <span>Pré-visualização do Iframe Autorizado (Ambiente de Teste)</span>
+                                </span>
+                                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/70 border border-emerald-500/30 px-2 py-0.5 rounded">
+                                  Sandbox Ativa
+                                </span>
+                              </div>
+                              <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
+                                <iframe
+                                  src={channelFormIframeTestUrl || (channels.find(c => c.id === editingChannelId)?.iframeUrl || '')}
+                                  title="Pré-visualização do Iframe"
+                                  className="w-full h-full border-0"
+                                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                  allowFullScreen
+                                />
+                              </div>
+                              <span className="text-[10px] text-slate-400 block text-center">
+                                O iframe é renderizado com atributos estritos permitidos e proporção responsiva.
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Linha 5: Status, Permissão de Acesso e Resolução */}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2669,6 +3693,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <span>Banners e Slots Estáticos</span>
                     <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-black/40 text-blue-200">
                       5
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAdTab('inplay')}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                      adTab === 'inplay'
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Banner In-Play no Player</span>
+                    <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${inplayIsEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
+                      {inplayIsEnabled ? 'ATIVO' : 'OFF'}
                     </span>
                   </button>
                 </div>
@@ -2982,40 +4022,769 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* SUB-TAB 2: BANNERS E SLOTS ESTÁTICOS (PRESERVADO) */}
               {adTab === 'banners' && (
                 <div className="space-y-4 animate-in fade-in duration-200">
-                  <div className="p-3 rounded-xl bg-[#090f20] border border-blue-900/40 text-xs text-slate-400">
-                    Estes 5 espaços publicitários estáticos são posicionados no cabeçalho, topo da grade, lateral do player, rodapé e modal de planos.
+                  <div className="p-4 rounded-xl bg-blue-950/30 border border-blue-500/20 text-xs text-slate-300 flex items-start gap-3">
+                    <Database className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                    <div className="leading-relaxed">
+                      <strong className="text-white">Gerenciamento dos 5 Espaços Publicitários Estáticos: </strong>
+                      Cadastre e gerencie anúncios por upload de imagem (JPG, PNG, WebP), URL externa (HTTPS) ou código de script de redes parceiras (Adsterra, AdSense em sandbox seguro). As alterações são salvas permanentemente no PostgreSQL com metadados independentes para cada slot.
+                    </div>
                   </div>
 
-                  {adSlots.map((slot) => (
-                    <div
-                      key={slot.id}
-                      className="p-5 rounded-xl bg-[#090f20] border border-blue-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-white">{slot.title}</span>
-                          <span className="text-[10px] font-mono text-blue-400 bg-blue-950 px-2 py-0.5 rounded border border-blue-900/40">
-                            {slot.dimensions}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-400">{slot.subtitle}</p>
-                      </div>
+                  {adSlots.map((slot) => {
+                    const hasImage = (slot.adType === 'image_upload' || slot.adType === 'image_url' || (!slot.adType && !!slot.imageUrl)) && !!slot.imageUrl && slot.imageUrl !== '#';
+                    const hasScript = slot.adType === 'code_script' && !!slot.codeSnippet && !slot.codeSnippet.startsWith('<!-- Espaço reservado');
 
-                      <div className="flex items-center gap-3">
+                    return (
+                      <div
+                        key={slot.id}
+                        className="p-5 rounded-2xl bg-[#090f20] border border-blue-900/40 hover:border-blue-700/60 transition-all flex flex-col md:flex-row md:items-center justify-between gap-5 shadow-lg"
+                      >
+                        {/* Slot Info & Content Summary */}
+                        <div className="space-y-2.5 flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-extrabold text-white">{slot.title}</span>
+                            <span className="text-[10px] font-mono text-blue-400 bg-blue-950 px-2 py-0.5 rounded-md border border-blue-900/50 font-bold">
+                              {slot.dimensions}
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-500 bg-black/40 px-1.5 py-0.5 rounded">
+                              ID: {slot.id}
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-slate-400 leading-relaxed">{slot.subtitle}</p>
+
+                          {/* Ad Content Summary Badges */}
+                          <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+                            {hasImage ? (
+                              <>
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-950/80 text-blue-300 border border-blue-500/30 font-medium">
+                                  <Image className="w-3 h-3 text-blue-400" />
+                                  <span>{slot.adType === 'image_upload' ? 'Opção A: Upload de Imagem' : 'Opção B: URL de Imagem'}</span>
+                                </span>
+                                {slot.advertiserName && (
+                                  <span className="px-2 py-1 rounded-lg bg-slate-900 text-slate-300 border border-slate-800">
+                                    Anunciante: <strong className="text-white">{slot.advertiserName}</strong>
+                                  </span>
+                                )}
+                                {slot.targetUrl && slot.targetUrl !== '#' && (
+                                  <span className="px-2 py-1 rounded-lg bg-slate-900 text-slate-400 border border-slate-800 truncate max-w-[220px]">
+                                    Link: {slot.targetUrl}
+                                  </span>
+                                )}
+                              </>
+                            ) : hasScript ? (
+                              <>
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-950/80 text-purple-300 border border-purple-500/30 font-medium">
+                                  <FileText className="w-3 h-3 text-purple-400" />
+                                  <span>Opção C: Código do Script de Anúncio</span>
+                                </span>
+                                {slot.advertiserName && (
+                                  <span className="px-2 py-1 rounded-lg bg-slate-900 text-slate-300 border border-slate-800">
+                                    Rede: <strong className="text-white">{slot.advertiserName}</strong>
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900/80 text-slate-400 border border-slate-800">
+                                <Megaphone className="w-3 h-3 text-slate-500" />
+                                <span>Sem anúncio cadastrado</span>
+                                {slot.showPlaceholderWhenEmpty && (
+                                  <span className="text-[10px] text-blue-400 ml-1">(Placeholder ativo se vazio)</span>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Thumbnail / Visual Indicator */}
+                        {hasImage && slot.imageUrl && (
+                          <div className="shrink-0 w-28 h-14 rounded-xl overflow-hidden bg-black/60 border border-blue-900/50 p-1 flex items-center justify-center">
+                            <img
+                              src={slot.imageUrl}
+                              alt={slot.altText || slot.title}
+                              className="w-full h-full object-contain"
+                            />
+                          </div>
+                        )}
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-2.5 shrink-0 self-start md:self-center">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleAdSlot(slot.id)}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm ${
+                              slot.isEnabled
+                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                                : 'bg-slate-800 hover:bg-slate-700 text-slate-400'
+                            }`}
+                            title={slot.isEnabled ? 'Clique para desativar este slot no site' : 'Clique para ativar este slot no site'}
+                          >
+                            <span className={`w-2 h-2 rounded-full ${slot.isEnabled ? 'bg-white animate-pulse' : 'bg-slate-500'}`} />
+                            <span>{slot.isEnabled ? 'Ativado' : 'Desativado'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleOpenManageAdSlot(slot)}
+                            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-md shadow-blue-950/50 cursor-pointer flex items-center gap-2"
+                            title="Abrir configurações de anúncio deste espaço"
+                          >
+                            <Sliders className="w-3.5 h-3.5" />
+                            <span>Gerenciar Banner</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* SUB-TAB 3: BANNER IN-PLAY NO PLAYER DE VÍDEO */}
+              {adTab === 'inplay' && (
+                <div className="space-y-6 animate-in fade-in duration-200">
+                  {/* Database persistence status banner */}
+                  <div className="p-3.5 rounded-xl bg-blue-950/40 border border-blue-500/30 text-xs text-slate-300 flex items-start gap-2.5">
+                    <Database className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                    <div className="leading-relaxed">
+                      <span className="font-bold text-white">Publicidade In-Play Sobreposta ao Vídeo: </span>
+                      Exibe banners discretos sobrepostos ao player durante a transmissão contínua dos canais. Respeita a reprodução sem travar o streaming, silenciado sem áudio, com fade-out suave, segmentação inteligente e isenção para assinantes com planos premium.
+                    </div>
+                  </div>
+
+                  {/* Feedback Messages */}
+                  {inplaySuccessMessage && (
+                    <div className="p-3.5 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-xs text-emerald-200 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>{inplaySuccessMessage}</span>
+                    </div>
+                  )}
+
+                  {inplayErrorMessage && (
+                    <div className="p-3.5 rounded-xl bg-red-950/80 border border-red-500/50 text-xs text-red-200 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                      <span>{inplayErrorMessage}</span>
+                    </div>
+                  )}
+
+                  {inplayNoticeWarning && (
+                    <div className="p-3.5 rounded-xl bg-amber-950/80 border border-amber-500/50 text-xs text-amber-200 flex items-start gap-2.5">
+                      <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <span className="font-bold text-amber-100">Aviso do Provedor de Anúncios:</span>
+                        <p>{inplayNoticeWarning}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSaveInPlay} className="space-y-6">
+                    {/* 1. Status & Formato */}
+                    <div className="p-5 rounded-2xl bg-[#090f20] border border-blue-900/40 space-y-5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-blue-900/30">
+                        <div>
+                          <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
+                            <Layers className="w-4 h-4 text-blue-400" />
+                            <span>1. Status da Publicidade In-Play</span>
+                          </h3>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            Ative ou desative globalmente a sobreposição de banners no player durante a reprodução.
+                          </p>
+                        </div>
+
                         <button
                           type="button"
-                          onClick={() => handleToggleAdSlot(slot.id)}
-                          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                            slot.isEnabled
-                              ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                          onClick={() => setInplayIsEnabled(!inplayIsEnabled)}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shadow-md ${
+                            inplayIsEnabled
+                              ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/50'
                               : 'bg-slate-800 hover:bg-slate-700 text-slate-400'
                           }`}
                         >
-                          {slot.isEnabled ? 'Slot Ativado' : 'Slot Desativado'}
+                          <span className={`w-2 h-2 rounded-full ${inplayIsEnabled ? 'bg-white animate-pulse' : 'bg-slate-500'}`} />
+                          <span>{inplayIsEnabled ? 'Banner In-Play Ativado' : 'Banner In-Play Desativado'}</span>
                         </button>
                       </div>
+
+                      {/* Format Choice */}
+                      <div>
+                        <label className="block text-slate-300 font-semibold text-xs mb-2">
+                          Formato de Publicidade Utilizado:
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setInplayAdFormat('script')}
+                            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                              inplayAdFormat === 'script'
+                                ? 'bg-blue-600/15 border-blue-500 text-white shadow-lg'
+                                : 'bg-[#060911] border-slate-800 text-slate-400 hover:border-slate-700'
+                            }`}
+                          >
+                            <FileText className={`w-5 h-5 shrink-0 mt-0.5 ${inplayAdFormat === 'script' ? 'text-blue-400' : 'text-slate-500'}`} />
+                            <div>
+                              <span className="font-bold text-xs block text-white">Script de Rede de Anúncios (Adsterra / Iframe)</span>
+                              <span className="text-[11px] text-slate-400 block mt-0.5">
+                                Código de rede em iframe isolado e seguro (sandbox) para banners 468x60, 300x50 ou 728x90.
+                              </span>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setInplayAdFormat('custom_banner')}
+                            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                              inplayAdFormat === 'custom_banner'
+                                ? 'bg-blue-600/15 border-blue-500 text-white shadow-lg'
+                                : 'bg-[#060911] border-slate-800 text-slate-400 hover:border-slate-700'
+                            }`}
+                          >
+                            <Image className={`w-5 h-5 shrink-0 mt-0.5 ${inplayAdFormat === 'custom_banner' ? 'text-blue-400' : 'text-slate-500'}`} />
+                            <div>
+                              <span className="font-bold text-xs block text-white">Banner Customizado da Plataforma (Imagem & Link)</span>
+                              <span className="text-[11px] text-slate-400 block mt-0.5">
+                                Upload de imagem própria com botão de ação direto, ideal para patrocinadores diretos ou promoções de planos.
+                              </span>
+                            </div>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  ))}
+
+                    {/* 2. Conteúdo do Anúncio (Script vs Custom Banner) */}
+                    {inplayAdFormat === 'script' ? (
+                      <div className="p-5 rounded-2xl bg-[#090f20] border border-blue-900/40 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-slate-200 font-bold text-xs">
+                            Código do Script de Anúncio In-Play <span className="text-red-400">*</span>
+                          </label>
+                          <span className="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2 py-0.5 rounded border border-blue-900/40">
+                            Iframe Sandboxed Isolado
+                          </span>
+                        </div>
+
+                        <textarea
+                          rows={6}
+                          value={inplayAdScriptCode}
+                          onChange={(e) => setInplayAdScriptCode(e.target.value)}
+                          placeholder="Cole aqui a tag <script> fornecida pela sua rede publicitária (ex: Adsterra Banners 468x60, 300x50, 728x90)&#10;&#10;<script type=&quot;text/javascript&quot;>&#10;  atOptions = { 'key' : '...', 'format' : 'iframe', 'height' : 60, 'width' : 468, 'params' : {} };&#10;</script>&#10;<script type=&quot;text/javascript&quot; src=&quot;//www.topcreativeformat.com/...&quot;></script>"
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-[#060911] border border-slate-700 text-white font-mono text-[11px] focus:border-blue-500 focus:outline-none"
+                        />
+
+                        {/* Technical limitation notice for Social Bar vs In-Play */}
+                        <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/30 text-xs text-amber-200/90 space-y-1.5">
+                          <div className="flex items-center gap-2 font-bold text-amber-300">
+                            <Info className="w-4 h-4 shrink-0" />
+                            <span>Aviso Técnico sobre Redes Publicitárias e Formato Social Bar:</span>
+                          </div>
+                          <p className="text-[11px] leading-relaxed text-amber-100/80">
+                            Formatos do tipo <strong>Social Bar</strong> da Adsterra são projetados pelos provedores para se ancorarem na janela inteira do navegador e não respeitam contêineres de vídeo sobrepostos. Caso você tente utilizar um script Social Bar dentro do player, o provedor poderá não exibir o anúncio ou tentar quebrar o sandbox. Para publicidade In-Play sobreposta, recomendamos <strong>formatos de banner padrão (468x60, 300x50, 728x90)</strong> ou a opção <strong>Banner Customizado da Plataforma</strong> abaixo.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-5 rounded-2xl bg-[#090f20] border border-blue-900/40 space-y-4">
+                        <h4 className="font-bold text-white text-xs">Configuração do Banner Customizado da Plataforma</h4>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-slate-300 font-semibold text-xs mb-1">
+                              Título do Anúncio / Patrocinador:
+                            </label>
+                            <input
+                              type="text"
+                              value={inplayBannerTitle}
+                              onChange={(e) => setInplayBannerTitle(e.target.value)}
+                              placeholder="Ex: Assine o Plano Anual Gato Net"
+                              className="w-full px-3.5 py-2 rounded-xl bg-[#060911] border border-slate-700 text-white text-xs focus:border-blue-500 focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 font-semibold text-xs mb-1">
+                              URL de Destino (Link ao Clicar):
+                            </label>
+                            <input
+                              type="url"
+                              value={inplayBannerTargetUrl}
+                              onChange={(e) => setInplayBannerTargetUrl(e.target.value)}
+                              placeholder="https://gatonet.tv/planos"
+                              className="w-full px-3.5 py-2 rounded-xl bg-[#060911] border border-slate-700 text-white text-xs focus:border-blue-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Banner Image URL & Upload */}
+                        <div>
+                          <label className="block text-slate-300 font-semibold text-xs mb-1">
+                            URL da Imagem do Banner ou Upload Direto:
+                          </label>
+                          <div className="flex flex-col sm:flex-row items-stretch gap-2">
+                            <input
+                              type="url"
+                              value={inplayBannerImageUrl}
+                              onChange={(e) => setInplayBannerImageUrl(e.target.value)}
+                              placeholder="https://exemplo.com/banner-promocional.png"
+                              className="flex-1 px-3.5 py-2 rounded-xl bg-[#060911] border border-slate-700 text-white text-xs focus:border-blue-500 focus:outline-none"
+                            />
+                            <label className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5 shrink-0">
+                              <Upload className="w-3.5 h-3.5 text-blue-400" />
+                              <span>{isUploadingInplayImage ? 'Enviando...' : 'Fazer Upload'}</span>
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp,image/gif"
+                                onChange={handleInplayImageUpload}
+                                className="hidden"
+                                disabled={isUploadingInplayImage}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. Posicionamento & Botão de Fechar */}
+                    <div className="p-5 rounded-2xl bg-[#090f20] border border-blue-900/40 space-y-4">
+                      <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
+                        <Sliders className="w-4 h-4 text-blue-400" />
+                        <span>2. Posicionamento e Interação</span>
+                      </h3>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-slate-300 font-semibold text-xs mb-1.5">
+                            Posição Sobreposta no Player:
+                          </label>
+                          <select
+                            value={inplayPosition}
+                            onChange={(e) => setInplayPosition(e.target.value as InPlayPosition)}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-[#060911] border border-slate-700 text-white text-xs focus:border-blue-500 focus:outline-none cursor-pointer"
+                          >
+                            <option value="bottom_center">Parte Inferior Central (Recomendado)</option>
+                            <option value="bottom_left">Parte Inferior Esquerda</option>
+                            <option value="bottom_right">Parte Inferior Direita</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-300 font-semibold text-xs mb-1.5">
+                            Botão de Fechamento (X):
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setInplayCloseButtonEnabled(!inplayCloseButtonEnabled)}
+                            className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-bold transition-colors cursor-pointer flex items-center justify-between ${
+                              inplayCloseButtonEnabled
+                                ? 'bg-blue-950/40 border-blue-600/50 text-blue-200'
+                                : 'bg-[#060911] border-slate-800 text-slate-400'
+                            }`}
+                          >
+                            <span>Permitir Fechar pelo Usuário (Botão 'X')</span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${inplayCloseButtonEnabled ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                              {inplayCloseButtonEnabled ? 'HABILITADO' : 'DESABILITADO'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 4. Configuração de Temporizadores & Efeito Fade-Out */}
+                    <div className="p-5 rounded-2xl bg-[#090f20] border border-blue-900/40 space-y-4">
+                      <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-blue-400" />
+                        <span>3. Temporizadores & Efeito Fade-Out</span>
+                      </h3>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {/* Delay */}
+                        <div>
+                          <label className="block text-slate-300 font-semibold text-xs mb-1">
+                            Início do Banner (Delay):
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              min={3}
+                              max={600}
+                              value={inplayDelaySeconds}
+                              onChange={(e) => setInplayDelaySeconds(Math.max(3, Number(e.target.value)))}
+                              className="w-full px-3 py-2 pr-14 rounded-xl bg-[#060911] border border-slate-700 text-white text-xs font-mono focus:border-blue-500 focus:outline-none"
+                            />
+                            <span className="absolute right-3 top-2 text-[11px] text-slate-500 font-mono">segundos</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 mt-1 block">Mínimo: 3s após iniciar canal</span>
+                        </div>
+
+                        {/* Interval */}
+                        <div>
+                          <label className="block text-slate-300 font-semibold text-xs mb-1">
+                            Intervalo Periódico:
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              min={0}
+                              max={180}
+                              value={inplayIntervalMinutes}
+                              onChange={(e) => setInplayIntervalMinutes(Math.max(0, Number(e.target.value)))}
+                              className="w-full px-3 py-2 pr-14 rounded-xl bg-[#060911] border border-slate-700 text-white text-xs font-mono focus:border-blue-500 focus:outline-none"
+                            />
+                            <span className="absolute right-3 top-2 text-[11px] text-slate-500 font-mono">minutos</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 mt-1 block">0 = Exibir apenas 1x na sessão</span>
+                        </div>
+
+                        {/* Duration */}
+                        <div>
+                          <label className="block text-slate-300 font-semibold text-xs mb-1">
+                            Duração em Tela:
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              min={5}
+                              max={300}
+                              value={inplayDurationSeconds}
+                              onChange={(e) => setInplayDurationSeconds(Math.max(5, Number(e.target.value)))}
+                              className="w-full px-3 py-2 pr-14 rounded-xl bg-[#060911] border border-slate-700 text-white text-xs font-mono focus:border-blue-500 focus:outline-none"
+                            />
+                            <span className="absolute right-3 top-2 text-[11px] text-slate-500 font-mono">segundos</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 mt-1 block">Tempo antes do fade-out</span>
+                        </div>
+
+                        {/* Fade-Out */}
+                        <div>
+                          <label className="block text-slate-300 font-semibold text-xs mb-1">
+                            Fade-Out (Transição):
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="0.1"
+                              min={0.2}
+                              max={5.0}
+                              value={inplayFadeOutSeconds}
+                              onChange={(e) => setInplayFadeOutSeconds(Math.max(0.2, Math.min(5.0, Number(e.target.value))))}
+                              className="w-full px-3 py-2 pr-14 rounded-xl bg-[#060911] border border-slate-700 text-white text-xs font-mono focus:border-blue-500 focus:outline-none"
+                            />
+                            <span className="absolute right-3 top-2 text-[11px] text-slate-500 font-mono">segundos</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 mt-1 block">Velocidade de desaparecimento</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 5. Segmentação da Exibição */}
+                    <div className="p-5 rounded-2xl bg-[#090f20] border border-blue-900/40 space-y-4">
+                      <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
+                        <Filter className="w-4 h-4 text-blue-400" />
+                        <span>4. Segmentação da Exibição</span>
+                      </h3>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <label className={`p-3.5 rounded-xl border flex items-center gap-3 cursor-pointer transition-all ${
+                          inplayTargetType === 'all'
+                            ? 'bg-blue-600/15 border-blue-500 text-white'
+                            : 'bg-[#060911] border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="inplay_target_type"
+                            checked={inplayTargetType === 'all'}
+                            onChange={() => setInplayTargetType('all')}
+                            className="text-blue-600"
+                          />
+                          <div>
+                            <span className="text-xs font-bold block text-white">Todos os Canais</span>
+                            <span className="text-[10px] text-slate-400">Exibição global em toda a grade</span>
+                          </div>
+                        </label>
+
+                        <label className={`p-3.5 rounded-xl border flex items-center gap-3 cursor-pointer transition-all ${
+                          inplayTargetType === 'channels'
+                            ? 'bg-blue-600/15 border-blue-500 text-white'
+                            : 'bg-[#060911] border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="inplay_target_type"
+                            checked={inplayTargetType === 'channels'}
+                            onChange={() => setInplayTargetType('channels')}
+                            className="text-blue-600"
+                          />
+                          <div>
+                            <span className="text-xs font-bold block text-white">Canais Específicos</span>
+                            <span className="text-[10px] text-slate-400">Selecionar canais individuais</span>
+                          </div>
+                        </label>
+
+                        <label className={`p-3.5 rounded-xl border flex items-center gap-3 cursor-pointer transition-all ${
+                          inplayTargetType === 'categories'
+                            ? 'bg-blue-600/15 border-blue-500 text-white'
+                            : 'bg-[#060911] border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="inplay_target_type"
+                            checked={inplayTargetType === 'categories'}
+                            onChange={() => setInplayTargetType('categories')}
+                            className="text-blue-600"
+                          />
+                          <div>
+                            <span className="text-xs font-bold block text-white">Categorias Específicas</span>
+                            <span className="text-[10px] text-slate-400">Selecionar categorias inteiras</span>
+                          </div>
+                        </label>
+                      </div>
+
+                      {/* Channels Multi-Select */}
+                      {inplayTargetType === 'channels' && (
+                        <div className="p-4 rounded-xl bg-[#060911] border border-slate-800 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <label className="text-xs font-bold text-slate-300">
+                              Selecione os Canais ({inplayTargetChannelIds.length} selecionados):
+                            </label>
+                            <input
+                              type="text"
+                              value={inplayChannelSearchQuery}
+                              onChange={(e) => setInplayChannelSearchQuery(e.target.value)}
+                              placeholder="Buscar canal..."
+                              className="px-2.5 py-1 text-xs rounded-lg bg-[#090f20] border border-slate-700 text-white w-48 focus:outline-none"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-1">
+                            {channels
+                              .filter((c) => c.name.toLowerCase().includes(inplayChannelSearchQuery.toLowerCase()))
+                              .map((c) => {
+                                const isChecked = inplayTargetChannelIds.includes(c.id);
+                                return (
+                                  <label
+                                    key={c.id}
+                                    className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-2 cursor-pointer transition-colors ${
+                                      isChecked
+                                        ? 'bg-blue-950/60 border-blue-500 text-white'
+                                        : 'bg-[#090f20] border-slate-800 text-slate-400 hover:text-white'
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() => {
+                                        if (isChecked) {
+                                          setInplayTargetChannelIds(inplayTargetChannelIds.filter((id) => id !== c.id));
+                                        } else {
+                                          setInplayTargetChannelIds([...inplayTargetChannelIds, c.id]);
+                                        }
+                                      }}
+                                      className="rounded text-blue-600"
+                                    />
+                                    <span className="truncate">{c.name}</span>
+                                  </label>
+                                );
+                              })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Categories Multi-Select */}
+                      {inplayTargetType === 'categories' && (
+                        <div className="p-4 rounded-xl bg-[#060911] border border-slate-800 space-y-3">
+                          <label className="text-xs font-bold text-slate-300 block">
+                            Selecione as Categorias ({inplayTargetCategoryIds.length} selecionadas):
+                          </label>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-1">
+                            {categories.map((cat) => {
+                              const isChecked = inplayTargetCategoryIds.includes(cat.id);
+                              return (
+                                <label
+                                  key={cat.id}
+                                  className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-2 cursor-pointer transition-colors ${
+                                    isChecked
+                                      ? 'bg-blue-950/60 border-blue-500 text-white'
+                                      : 'bg-[#090f20] border-slate-800 text-slate-400 hover:text-white'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => {
+                                      if (isChecked) {
+                                        setInplayTargetCategoryIds(inplayTargetCategoryIds.filter((id) => id !== cat.id));
+                                      } else {
+                                        setInplayTargetCategoryIds([...inplayTargetCategoryIds, cat.id]);
+                                      }
+                                    }}
+                                    className="rounded text-blue-600"
+                                  />
+                                  <span className="truncate">{cat.name}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 6. Planos de Assinatura Isentos de Publicidade */}
+                    <div className="p-5 rounded-2xl bg-[#090f20] border border-blue-900/40 space-y-4">
+                      <div>
+                        <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
+                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                          <span>5. Planos de Assinatura Isentos de Publicidade</span>
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-1">
+                          "Assinantes ativos dos planos selecionados abaixo não serão impactados pelos anúncios In-Play."
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {plans.map((p) => {
+                          const isExempt = inplayExemptPlanIds.includes(p.id);
+                          return (
+                            <label
+                              key={p.id}
+                              className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-colors ${
+                                isExempt
+                                  ? 'bg-emerald-950/40 border-emerald-500/60 text-white'
+                                  : 'bg-[#060911] border-slate-800 text-slate-400 hover:border-slate-700'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isExempt}
+                                onChange={() => {
+                                  if (isExempt) {
+                                    setInplayExemptPlanIds(inplayExemptPlanIds.filter((id) => id !== p.id));
+                                  } else {
+                                    setInplayExemptPlanIds([...inplayExemptPlanIds, p.id]);
+                                  }
+                                }}
+                                className="mt-0.5 rounded text-emerald-600"
+                              />
+                              <div>
+                                <span className="text-xs font-bold text-white block">{p.name}</span>
+                                <span className="text-[10px] text-slate-400 block font-mono">
+                                  R$ {p.price.toFixed(2)} • {p.maxScreens} {p.maxScreens === 1 ? 'tela' : 'telas'}
+                                </span>
+                                <span className="text-[10px] text-emerald-400 block mt-1">
+                                  {isExempt ? '✓ Isento de Anúncios In-Play' : 'Exibe anúncios normalmente'}
+                                </span>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 7. Prévia em Tempo Real (Live Preview no Mockup do Player) */}
+                    <div className="p-5 rounded-2xl bg-[#090f20] border border-blue-900/40 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-bold text-white text-xs flex items-center gap-2">
+                          <Eye className="w-4 h-4 text-blue-400" />
+                          <span>Prévia Visual da Sobreposição no Player</span>
+                        </h4>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          Posição: {inplayPosition} | Fade: {inplayFadeOutSeconds}s
+                        </span>
+                      </div>
+
+                      {/* Mock Player Screen */}
+                      <div className="relative aspect-video max-w-lg mx-auto bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center shadow-2xl">
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/60 flex flex-col justify-between p-4 pointer-events-none">
+                          <div className="flex items-center justify-between text-xs text-white">
+                            <span className="flex items-center gap-1.5 font-bold">
+                              <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
+                              <span>AO VIVO • Canal de Teste HD</span>
+                            </span>
+                          </div>
+                          <div className="h-1 bg-slate-700/50 rounded-full w-full overflow-hidden">
+                            <div className="h-full bg-blue-500 w-2/3" />
+                          </div>
+                        </div>
+
+                        {/* Banner Overlay inside Mock */}
+                        <div
+                          className={`absolute z-10 w-[90%] max-w-[420px] p-2 rounded-xl bg-[#080d1e]/95 border border-blue-500/50 shadow-2xl backdrop-blur-md transition-all ${
+                            inplayPosition === 'bottom_left'
+                              ? 'bottom-6 left-3'
+                              : inplayPosition === 'bottom_right'
+                              ? 'bottom-6 right-3'
+                              : 'bottom-6 left-1/2 -translate-x-1/2'
+                          }`}
+                        >
+                          {inplayCloseButtonEnabled && (
+                            <div className="absolute top-1.5 right-1.5 p-1 rounded-full bg-slate-900 border border-slate-700 text-slate-300">
+                              <X className="w-2.5 h-2.5" />
+                            </div>
+                          )}
+
+                          {inplayAdFormat === 'script' ? (
+                            <div className="py-2 text-center font-mono text-[10px] text-blue-300">
+                              <span>[ Iframe Sandboxed Adsterra / Rede Publicitária ]</span>
+                              <div className="text-[9px] text-slate-400 mt-0.5 truncate">
+                                {inplayAdScriptCode ? 'Código configurado pronto para renderização' : 'Nenhum script configurado'}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2.5 pr-4">
+                              {inplayBannerImageUrl ? (
+                                <img
+                                  src={inplayBannerImageUrl}
+                                  alt="Preview"
+                                  className="h-9 w-auto max-w-[80px] rounded object-contain bg-black/40"
+                                />
+                              ) : (
+                                <div className="h-9 w-14 rounded bg-slate-800 flex items-center justify-center text-[9px] text-slate-400">
+                                  IMG
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <span className="text-[9px] text-blue-400 font-mono font-bold uppercase block">
+                                  Publicidade In-Play
+                                </span>
+                                <span className="text-[11px] font-bold text-white block truncate">
+                                  {inplayBannerTitle || 'Título do Anúncio'}
+                                </span>
+                              </div>
+                              <span className="px-2 py-1 rounded bg-blue-600 text-white text-[10px] font-bold shrink-0">
+                                Acessar
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Submit Bar */}
+                    <div className="flex items-center justify-end gap-3 pt-4 border-t border-blue-900/40">
+                      <button
+                        type="button"
+                        onClick={fetchInPlaySettings}
+                        disabled={isLoadingInPlay || isSavingInPlay}
+                        className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Recarregar</span>
+                      </button>
+
+                      <button
+                        type="submit"
+                        disabled={isSavingInPlay}
+                        className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-xs font-bold transition-all shadow-lg shadow-blue-950/50 cursor-pointer flex items-center gap-2"
+                      >
+                        {isSavingInPlay ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Salvando no PostgreSQL...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Save className="w-3.5 h-3.5" />
+                            <span>Salvar Configurações In-Play</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
                 </div>
               )}
 
@@ -3489,6 +5258,416 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         Fechar Prévia
                       </button>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Gerenciar Banner Modal (Banners e Slots Estáticos) */}
+              {isAdSlotModalOpen && editingAdSlot && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                  <div className="w-full max-w-3xl bg-[#090f20] border border-blue-900/60 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+                    {/* Modal Header */}
+                    <div className="p-5 bg-[#0b1329] border-b border-blue-900/40 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                          <Sliders className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-extrabold text-white text-base">
+                              Gerenciar Banner — {editingAdSlot.title}
+                            </h3>
+                            <span className="text-[11px] font-mono text-blue-400 bg-blue-950 px-2 py-0.5 rounded border border-blue-900/50">
+                              {editingAdSlot.dimensions}
+                            </span>
+                          </div>
+                          <span className="text-xs text-slate-400 block mt-0.5">
+                            Configure o conteúdo publicitário exibido neste espaço específico da plataforma.
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAdSlotModalOpen(false);
+                          setEditingAdSlot(null);
+                          setAdSlotModalError(null);
+                          setAdSlotModalWarning(null);
+                        }}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                        title="Fechar formulário"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {/* Alerts */}
+                    {adSlotModalError && (
+                      <div className="mx-6 mt-4 p-3.5 rounded-xl bg-red-950/80 border border-red-500/50 text-xs text-red-200 flex items-center gap-2.5">
+                        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                        <span>{adSlotModalError}</span>
+                      </div>
+                    )}
+
+                    {adSlotModalWarning && (
+                      <div className="mx-6 mt-4 p-3.5 rounded-xl bg-amber-950/80 border border-amber-500/50 text-xs text-amber-200 flex items-start gap-2.5">
+                        <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <span>{adSlotModalWarning}</span>
+                      </div>
+                    )}
+
+                    {/* Modal Body / Form */}
+                    <form onSubmit={handleSaveAdSlot} className="p-6 space-y-5 overflow-y-auto flex-1 text-xs">
+                      {/* 1. Status & Placeholder Settings */}
+                      <div className="p-4 rounded-xl bg-[#060911] border border-slate-800 space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <span className="text-slate-200 font-bold block text-sm">Status do Espaço Publicitário</span>
+                            <span className="text-[11px] text-slate-400">
+                              Quando ativado e com anúncio válido, exibe no local correspondente do site público.
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setAdSlotFormIsEnabled(!adSlotFormIsEnabled)}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+                              adSlotFormIsEnabled
+                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                                : 'bg-slate-800 hover:bg-slate-700 text-slate-400'
+                            }`}
+                          >
+                            <span className={`w-2 h-2 rounded-full ${adSlotFormIsEnabled ? 'bg-white animate-pulse' : 'bg-slate-500'}`} />
+                            <span>{adSlotFormIsEnabled ? 'Slot Ativado' : 'Slot Desativado'}</span>
+                          </button>
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-800/80">
+                          <label className="flex items-center gap-2.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={adSlotFormShowPlaceholderWhenEmpty}
+                              onChange={(e) => setAdSlotFormShowPlaceholderWhenEmpty(e.target.checked)}
+                              className="rounded border-slate-700 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-slate-300 text-[11px]">
+                              Manter espaço reservado (placeholder) visível no site caso o slot esteja ativo mas sem anúncio cadastrado.
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* 2. Ad Type Choice */}
+                      <div className="space-y-2">
+                        <label className="block text-slate-200 font-bold">
+                          Tipo de Anúncio Disponível: <span className="text-red-400">*</span>
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setAdSlotFormType('image_upload')}
+                            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                              adSlotFormType === 'image_upload'
+                                ? 'bg-blue-600/15 border-blue-500 text-white shadow-md'
+                                : 'bg-[#060911] border-slate-800 text-slate-400 hover:border-slate-700'
+                            }`}
+                          >
+                            <Upload className={`w-4 h-4 shrink-0 mt-0.5 ${adSlotFormType === 'image_upload' ? 'text-blue-400' : 'text-slate-500'}`} />
+                            <div>
+                              <strong className="block text-xs text-white">Opção A — Upload</strong>
+                              <span className="text-[10px] text-slate-400 leading-tight block mt-0.5">
+                                JPG, PNG e WebP armazenados no servidor.
+                              </span>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setAdSlotFormType('image_url')}
+                            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                              adSlotFormType === 'image_url'
+                                ? 'bg-blue-600/15 border-blue-500 text-white shadow-md'
+                                : 'bg-[#060911] border-slate-800 text-slate-400 hover:border-slate-700'
+                            }`}
+                          >
+                            <Globe className={`w-4 h-4 shrink-0 mt-0.5 ${adSlotFormType === 'image_url' ? 'text-blue-400' : 'text-slate-500'}`} />
+                            <div>
+                              <strong className="block text-xs text-white">Opção B — URL de Imagem</strong>
+                              <span className="text-[10px] text-slate-400 leading-tight block mt-0.5">
+                                URL HTTPS de CDN ou parceiro.
+                              </span>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setAdSlotFormType('code_script')}
+                            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                              adSlotFormType === 'code_script'
+                                ? 'bg-blue-600/15 border-blue-500 text-white shadow-md'
+                                : 'bg-[#060911] border-slate-800 text-slate-400 hover:border-slate-700'
+                            }`}
+                          >
+                            <FileText className={`w-4 h-4 shrink-0 mt-0.5 ${adSlotFormType === 'code_script' ? 'text-blue-400' : 'text-slate-500'}`} />
+                            <div>
+                              <strong className="block text-xs text-white">Opção C — Código de Anúncio</strong>
+                              <span className="text-[10px] text-slate-400 leading-tight block mt-0.5">
+                                Adsterra, AdSense em sandbox seguro.
+                              </span>
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 3. Conditional Fields based on Ad Type */}
+                      {/* OPÇÃO A: UPLOAD DE IMAGEM */}
+                      {adSlotFormType === 'image_upload' && (
+                        <div className="p-4 rounded-xl bg-[#060911] border border-slate-800 space-y-4">
+                          <label className="block text-slate-200 font-bold flex items-center justify-between">
+                            <span>Selecionar Imagem do Banner (JPG, PNG, WebP — Até 5 MB)</span>
+                            {isUploadingAdSlotImage && (
+                              <span className="text-blue-400 animate-pulse text-[11px]">Enviando imagem...</span>
+                            )}
+                          </label>
+
+                          <div className="border border-dashed border-slate-700 hover:border-blue-500/80 rounded-xl p-4 text-center transition-colors bg-[#080d1a]/50">
+                            <Upload className="w-6 h-6 text-blue-400 mx-auto mb-2" />
+                            <label className="block text-xs font-semibold text-white mb-1 cursor-pointer">
+                              Clique para escolher arquivo do dispositivo
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                onChange={handleAdSlotImageUpload}
+                                className="hidden"
+                                disabled={isUploadingAdSlotImage}
+                              />
+                            </label>
+                            <span className="block text-[11px] text-slate-400">
+                              Dimensões recomendadas para este slot: <strong className="text-blue-300">{editingAdSlot.dimensions}</strong>
+                            </span>
+                          </div>
+
+                          {adSlotFormImageUrl && (
+                            <div className="p-2 rounded-lg bg-[#080d1a] border border-slate-800 flex items-center justify-between text-[11px]">
+                              <span className="font-mono text-slate-300 truncate max-w-sm">{adSlotFormImageUrl}</span>
+                              <span className="text-emerald-400 font-semibold">Imagem Carregada</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* OPÇÃO B: URL DE IMAGEM */}
+                      {adSlotFormType === 'image_url' && (
+                        <div className="p-4 rounded-xl bg-[#060911] border border-slate-800 space-y-3">
+                          <label className="block text-slate-200 font-bold">
+                            URL HTTPS da Imagem: <span className="text-red-400">*</span>
+                          </label>
+                          <input
+                            type="url"
+                            value={adSlotFormImageUrl}
+                            onChange={(e) => setAdSlotFormImageUrl(e.target.value)}
+                            placeholder="https://exemplo.com/banners/anuncio-728x90.png"
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-[#090f20] border border-slate-700 text-white font-mono text-xs focus:border-blue-500 focus:outline-none"
+                          />
+                          <span className="block text-[11px] text-slate-400">
+                            Somente URLs com protocolo seguro HTTPS são permitidas para evitar bloqueios de conteúdo misto.
+                          </span>
+                        </div>
+                      )}
+
+                      {/* OPÇÃO C: CÓDIGO DO SCRIPT DE ANÚNCIO */}
+                      {adSlotFormType === 'code_script' && (
+                        <div className="p-4 rounded-xl bg-[#060911] border border-slate-800 space-y-3">
+                          <label className="block text-slate-200 font-bold flex items-center justify-between">
+                            <span>Código do Script de Anúncio (Adsterra / Redes Autorizadas): <span className="text-red-400">*</span></span>
+                            <span className="text-[10px] text-purple-300 font-mono">Sandbox Seguro (Sem dangerouslySetInnerHTML)</span>
+                          </label>
+                          <textarea
+                            rows={4}
+                            value={adSlotFormCodeSnippet}
+                            onChange={(e) => setAdSlotFormCodeSnippet(e.target.value)}
+                            placeholder="<script type='text/javascript'>...</script> ou <ins class='adsbygoogle' ...></ins>"
+                            className="w-full p-3 rounded-xl bg-[#090f20] border border-slate-700 text-white font-mono text-[11px] focus:border-blue-500 focus:outline-none leading-relaxed"
+                          />
+                          <div className="p-2.5 rounded-lg bg-blue-950/40 border border-blue-500/20 text-[11px] text-slate-300 leading-relaxed">
+                            <span className="font-semibold text-white">Carregamento Seguro: </span>
+                            O código é executado em um iframe isolado com sandbox (<code className="text-blue-300">allow-scripts allow-popups allow-forms</code>). Não executa scripts arbitrários no contexto principal da aplicação e respeita as políticas da rede publicitária.
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Meta Fields (Destino, Anunciante, Alt, Aba) for Images */}
+                      {(adSlotFormType === 'image_upload' || adSlotFormType === 'image_url') && (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-slate-300 font-semibold mb-1">
+                                URL de Destino ao Clicar (Link do Anunciante):
+                              </label>
+                              <input
+                                type="url"
+                                value={adSlotFormTargetUrl}
+                                onChange={(e) => setAdSlotFormTargetUrl(e.target.value)}
+                                placeholder="https://anunciante.com.br/promocao"
+                                className="w-full px-3.5 py-2.5 rounded-xl bg-[#060911] border border-slate-700 text-white font-mono text-xs focus:border-blue-500 focus:outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-300 font-semibold mb-1">
+                                Nome do Anunciante / Marca:
+                              </label>
+                              <input
+                                type="text"
+                                value={adSlotFormAdvertiserName}
+                                onChange={(e) => setAdSlotFormAdvertiserName(e.target.value)}
+                                placeholder="Ex: Virtarix Cloud, Gato Net Fibra"
+                                className="w-full px-3.5 py-2.5 rounded-xl bg-[#060911] border border-slate-700 text-white text-xs focus:border-blue-500 focus:outline-none"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+                            <div>
+                              <label className="block text-slate-300 font-semibold mb-1">
+                                Texto Alternativo da Imagem (Alt Text):
+                              </label>
+                              <input
+                                type="text"
+                                value={adSlotFormAltText}
+                                onChange={(e) => setAdSlotFormAltText(e.target.value)}
+                                placeholder="Ex: Banner Promocional Planos de Fibra Óptica"
+                                className="w-full px-3.5 py-2.5 rounded-xl bg-[#060911] border border-slate-700 text-white text-xs focus:border-blue-500 focus:outline-none"
+                              />
+                            </div>
+
+                            <div className="pt-4">
+                              <label className="flex items-center gap-2.5 cursor-pointer p-2.5 rounded-xl bg-[#060911] border border-slate-800">
+                                <input
+                                  type="checkbox"
+                                  checked={adSlotFormOpenInNewTab}
+                                  onChange={(e) => setAdSlotFormOpenInNewTab(e.target.checked)}
+                                  className="rounded border-slate-700 text-blue-600 focus:ring-blue-500"
+                                />
+                                <div>
+                                  <span className="text-white font-bold block text-xs">Abrir link em nova aba (target="_blank")</span>
+                                  <span className="text-[10px] text-slate-400">Mantém a plataforma aberta enquanto o visitante acessa o anunciante</span>
+                                </div>
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* If Script, option to set Advertiser Name */}
+                      {adSlotFormType === 'code_script' && (
+                        <div>
+                          <label className="block text-slate-300 font-semibold mb-1">
+                            Nome da Rede / Parceiro (Opcional):
+                          </label>
+                          <input
+                            type="text"
+                            value={adSlotFormAdvertiserName}
+                            onChange={(e) => setAdSlotFormAdvertiserName(e.target.value)}
+                            placeholder="Ex: Adsterra Network, Google AdSense"
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-[#060911] border border-slate-700 text-white text-xs focus:border-blue-500 focus:outline-none"
+                          />
+                        </div>
+                      )}
+
+                      {/* 4. Live Real-Time Preview Container */}
+                      <div className="p-4 rounded-xl bg-[#060911] border border-blue-900/40 space-y-2">
+                        <div className="flex items-center justify-between text-slate-300 font-bold">
+                          <span className="flex items-center gap-2">
+                            <Eye className="w-4 h-4 text-blue-400" />
+                            <span>Pré-visualização do Anúncio em Tempo Real</span>
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-400">{editingAdSlot.dimensions}</span>
+                        </div>
+
+                        <div className="p-4 rounded-xl bg-[#080d1a] border border-slate-800 flex items-center justify-center min-h-[110px] overflow-hidden">
+                          {(adSlotFormType === 'image_upload' || adSlotFormType === 'image_url') && adSlotFormImageUrl ? (
+                            <div className="relative group max-w-full">
+                              <img
+                                src={adSlotFormImageUrl}
+                                alt={adSlotFormAltText || 'Preview do banner'}
+                                className="max-h-[100px] w-auto max-w-full object-contain rounded"
+                              />
+                              {adSlotFormTargetUrl && (
+                                <div className="text-[10px] text-blue-400 font-mono mt-1 text-center truncate">
+                                  Destino: {adSlotFormTargetUrl}
+                                </div>
+                              )}
+                            </div>
+                          ) : adSlotFormType === 'code_script' && adSlotFormCodeSnippet ? (
+                            <div className="w-full text-center py-2">
+                              <div className="text-[11px] text-purple-300 font-mono mb-1 font-bold">
+                                [ Iframe Sandboxed Oficial ]
+                              </div>
+                              <iframe
+                                title="preview-ad-script"
+                                srcDoc={`<!DOCTYPE html><html><body style="margin:0;padding:4px;display:flex;align-items:center;justify-content:center;background:transparent;color:#94a3b8;font-family:sans-serif;font-size:12px;">${adSlotFormCodeSnippet}</body></html>`}
+                                sandbox="allow-scripts allow-popups allow-forms"
+                                className="w-full h-20 border border-slate-800 rounded bg-black/40"
+                              />
+                            </div>
+                          ) : (
+                            <div className="text-center py-4 text-slate-500">
+                              <Megaphone className="w-6 h-6 mx-auto mb-1 opacity-50" />
+                              <span className="text-xs">Nenhum conteúdo configurado para prévia no momento.</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Modal Footer Actions */}
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-800">
+                        <div>
+                          {(editingAdSlot.imageUrl || editingAdSlot.codeSnippet || editingAdSlot.adType !== 'none') && (
+                            <button
+                              type="button"
+                              onClick={handleRemoveAdFromSlot}
+                              disabled={isSavingAdSlot}
+                              className="px-4 py-2.5 rounded-xl border border-rose-500/40 text-rose-300 hover:bg-rose-950/40 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                              <span>Remover Anúncio</span>
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsAdSlotModalOpen(false);
+                              setEditingAdSlot(null);
+                            }}
+                            disabled={isSavingAdSlot}
+                            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-colors cursor-pointer"
+                          >
+                            Cancelar
+                          </button>
+
+                          <button
+                            type="submit"
+                            disabled={isSavingAdSlot || isUploadingAdSlotImage}
+                            className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-xs font-bold transition-all shadow-lg shadow-blue-950/50 cursor-pointer flex items-center gap-2"
+                          >
+                            {isSavingAdSlot ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                <span>Salvando no PostgreSQL...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Save className="w-3.5 h-3.5" />
+                                <span>Salvar Configurações</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </form>
                   </div>
                 </div>
               )}
@@ -5917,6 +8096,300 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         />
                       </button>
                     </div>
+
+                    {/* Select: Default Home Tab (Aba Inicial da Grade de Canais) */}
+                    <div className="p-4 rounded-xl bg-[#060a14] border border-blue-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="space-y-1 max-w-xl">
+                        <div className="flex items-center gap-2">
+                          <Trophy className="w-4 h-4 text-amber-400" />
+                          <span className="font-bold text-sm text-white">Aba Inicial da Grade de Canais</span>
+                          <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-500/30">
+                            Página Inicial
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          Define qual aba ficará selecionada automaticamente ao acessar a página inicial da Gato Net. Por padrão, a nova aba <strong>Futebol Ao Vivo</strong> é selecionada inicialmente.
+                        </p>
+                      </div>
+
+                      <div className="shrink-0 w-full sm:w-auto">
+                        <select
+                          value={tempDefaultHomeTab}
+                          onChange={(e) => setTempDefaultHomeTab(e.target.value)}
+                          className="w-full sm:w-64 px-3.5 py-2.5 rounded-xl bg-[#090f20] border border-blue-800/60 text-white text-xs font-semibold focus:outline-none focus:border-blue-500 cursor-pointer shadow-inner"
+                        >
+                          <option value="cat_football">⚽ Futebol Ao Vivo (Padrão)</option>
+                          <option value="cat_all">📺 Todos os Canais</option>
+                          {categories
+                            .filter(c => c.id !== 'cat_football' && c.id !== 'cat_all')
+                            .map(cat => (
+                              <option key={cat.id} value={cat.id}>
+                                📁 {cat.name}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* SEÇÃO DEDICADA: DOMÍNIOS AUTORIZADOS PARA PLAYER EXTERNO (IFRAME) */}
+                <div id="authorized-iframe-domains-section" className="p-6 rounded-2xl bg-[#090f20] border border-cyan-500/40 space-y-6 scroll-mt-24 shadow-xl shadow-cyan-950/20">
+                  {/* Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                    <div>
+                      <div className="flex items-center gap-2.5">
+                        <span className="p-2 rounded-xl bg-cyan-950/80 text-cyan-400 border border-cyan-500/30">
+                          <Globe className="w-5 h-5" />
+                        </span>
+                        <div>
+                          <h3 className="font-extrabold text-base text-white flex items-center gap-2">
+                            <span>Domínios Autorizados para Player Externo (iframe)</span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-500/40 font-bold">
+                              PostgreSQL
+                            </span>
+                          </h3>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            Gerenciamento de provedores autorizados para incorporação em canais com player externo.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-start sm:self-auto">
+                      <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-[#060a14] border border-slate-800 text-slate-300">
+                        <strong className="text-emerald-400">{authorizedDomainsList.filter(d => d.isActive).length}</strong> ativos de <strong className="text-white">{authorizedDomainsList.length}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={fetchAuthorizedIframeDomains}
+                        disabled={isLoadingAuthorizedDomains}
+                        className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                        title="Atualizar lista de domínios do banco de dados"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAuthorizedDomains ? 'animate-spin text-cyan-400' : ''}`} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Informative Security Constitution Card */}
+                  <div className="p-4 rounded-xl bg-[#060e22] border border-cyan-900/50 text-xs text-slate-300 space-y-2">
+                    <div className="flex items-center gap-2 text-cyan-300 font-bold">
+                      <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0" />
+                      <span>Regras Rígidas de Segurança & Validação no Servidor:</span>
+                    </div>
+                    <ul className="text-[11px] text-slate-400 space-y-1 list-disc pl-5 leading-relaxed">
+                      <li><strong>Hostname Exato:</strong> Cada domínio é validado individualmente sem aceitar subdomínios automaticamente (sem curingas como *).</li>
+                      <li><strong>Exigência Estrita de HTTPS:</strong> Players externos devem utilizar estritamente o protocolo seguro <code className="text-cyan-300">https://</code>.</li>
+                      <li><strong>Filtro Anti-XSS e Anti-SSRF:</strong> Scripts arbitrários (&lt;script&gt;), manipuladores de eventos e endereços locais/privados são bloqueados.</li>
+                      <li><strong>Persistência no PostgreSQL:</strong> Os domínios cadastrados ou modificados permanecem salvos permanentemente após reiniciar a aplicação.</li>
+                    </ul>
+                  </div>
+
+                  {/* FORMULÁRIO: ADICIONAR NOVO DOMÍNIO AUTORIZADO */}
+                  <form onSubmit={handleAuthorizeDomain} className="p-4 sm:p-5 rounded-xl bg-[#060a14] border border-cyan-800/40 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                      <div className="flex-1 space-y-1">
+                        <label className="block text-xs font-bold text-white flex items-center justify-between">
+                          <span>Novo domínio autorizado</span>
+                          <span className="text-[10px] text-slate-400 font-normal font-mono">
+                            Exemplo: sinalpublicoetv.vercel.app
+                          </span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            required
+                            placeholder="sinalpublicoetv.vercel.app"
+                            value={newAuthorizedDomainInput}
+                            onChange={(e) => setNewAuthorizedDomainInput(e.target.value)}
+                            className="w-full px-3.5 py-2.5 text-xs font-mono rounded-xl bg-[#090f20] border border-slate-700 text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={isAuthorizingDomain || !newAuthorizedDomainInput.trim()}
+                        className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-lg shadow-cyan-950/50 shrink-0"
+                      >
+                        {isAuthorizingDomain ? (
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Plus className="w-4 h-4" />
+                        )}
+                        <span>Autorizar Domínio</span>
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 pt-1">
+                      <span>Aceita URL completa com https:// ou apenas o hostname. O sistema normaliza automaticamente.</span>
+                      <button
+                        type="button"
+                        onClick={() => setNewAuthorizedDomainInput('sinalpublicoetv.vercel.app')}
+                        className="text-cyan-400 hover:text-cyan-300 underline cursor-pointer"
+                      >
+                        Preencher exemplo: sinalpublicoetv.vercel.app
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* LISTA / TABELA DE DOMÍNIOS CADASTRADOS */}
+                  <div className="space-y-3">
+                    {/* Filter and Search Bar */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#060a14] border border-slate-800 self-start">
+                        <button
+                          type="button"
+                          onClick={() => setDomainFilter('all')}
+                          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                            domainFilter === 'all'
+                              ? 'bg-cyan-600 text-white font-bold shadow'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          Todos ({authorizedDomainsList.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDomainFilter('active')}
+                          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                            domainFilter === 'active'
+                              ? 'bg-emerald-600 text-white font-bold shadow'
+                              : 'text-slate-400 hover:text-emerald-300'
+                          }`}
+                        >
+                          Ativos ({authorizedDomainsList.filter(d => d.isActive).length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDomainFilter('inactive')}
+                          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                            domainFilter === 'inactive'
+                              ? 'bg-red-600 text-white font-bold shadow'
+                              : 'text-slate-400 hover:text-red-300'
+                          }`}
+                        >
+                          Inativos ({authorizedDomainsList.filter(d => !d.isActive).length})
+                        </button>
+                      </div>
+
+                      <div className="w-full sm:w-64">
+                        <input
+                          type="text"
+                          placeholder="Buscar domínio..."
+                          value={domainSearchQuery}
+                          onChange={(e) => setDomainSearchQuery(e.target.value)}
+                          className="w-full px-3 py-1.5 text-xs font-mono rounded-xl bg-[#060a14] border border-slate-800 text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Table View */}
+                    <div className="rounded-xl border border-slate-800 overflow-hidden bg-[#060a14]">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-[#090f20] text-slate-400 font-mono border-b border-slate-800">
+                            <tr>
+                              <th className="py-3 px-4">Domínio Autorizado</th>
+                              <th className="py-3 px-4">Status</th>
+                              <th className="py-3 px-4">Cadastrado Por</th>
+                              <th className="py-3 px-4">Data de Inclusão</th>
+                              <th className="py-3 px-4 text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/80 text-slate-200">
+                            {authorizedDomainsList
+                              .filter(d => {
+                                if (domainFilter === 'active') return d.isActive;
+                                if (domainFilter === 'inactive') return !d.isActive;
+                                return true;
+                              })
+                              .filter(d => {
+                                if (!domainSearchQuery.trim()) return true;
+                                return d.domain.toLowerCase().includes(domainSearchQuery.trim().toLowerCase());
+                              })
+                              .map((dom) => {
+                                const isActionLoading = domainActionLoadingId === dom.id;
+                                return (
+                                  <tr key={dom.id} className="hover:bg-[#091124] transition-colors">
+                                    {/* Domain Hostname */}
+                                    <td className="py-3 px-4">
+                                      <div className="flex items-center gap-2">
+                                        <Globe className={`w-3.5 h-3.5 shrink-0 ${dom.isActive ? 'text-cyan-400' : 'text-slate-500'}`} />
+                                        <span className={`font-mono font-bold text-xs ${dom.isActive ? 'text-white' : 'text-slate-400 line-through'}`}>
+                                          {dom.domain}
+                                        </span>
+                                      </div>
+                                    </td>
+
+                                    {/* Status Badge */}
+                                    <td className="py-3 px-4">
+                                      {dom.isActive ? (
+                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/40">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                          Ativo
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-slate-900 text-slate-400 border border-slate-700">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                          Inativo
+                                        </span>
+                                      )}
+                                    </td>
+
+                                    {/* Added By */}
+                                    <td className="py-3 px-4 font-mono text-[11px] text-slate-400">
+                                      {dom.addedBy || 'admin'}
+                                    </td>
+
+                                    {/* Date */}
+                                    <td className="py-3 px-4 font-mono text-[11px] text-slate-400">
+                                      {dom.createdAt ? new Date(dom.createdAt).toLocaleDateString('pt-BR') : '—'}
+                                    </td>
+
+                                    {/* Action Buttons */}
+                                    <td className="py-3 px-4 text-right">
+                                      <div className="flex items-center justify-end gap-2">
+                                        <button
+                                          type="button"
+                                          disabled={isActionLoading}
+                                          onClick={() => handleToggleDomainActive(dom)}
+                                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-colors border ${
+                                            dom.isActive
+                                              ? 'bg-amber-950/60 hover:bg-amber-900 border-amber-500/40 text-amber-300'
+                                              : 'bg-emerald-950/60 hover:bg-emerald-900 border-emerald-500/40 text-emerald-300'
+                                          }`}
+                                          title={dom.isActive ? 'Desativar domínio temporariamente' : 'Ativar domínio'}
+                                        >
+                                          {dom.isActive ? 'Desativar' : 'Ativar'}
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          disabled={isActionLoading}
+                                          onClick={() => handleDeleteDomain(dom)}
+                                          className="p-1.5 rounded-lg bg-red-950/60 hover:bg-red-900 border border-red-500/40 text-red-300 cursor-pointer transition-colors"
+                                          title="Remover domínio da lista de autorizados"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {authorizedDomainsList.length === 0 && (
+                        <div className="p-8 text-center text-xs text-slate-400 space-y-1">
+                          <p>Nenhum domínio autorizado cadastrado no momento.</p>
+                          <p className="text-[11px] text-slate-500">Utilize o campo acima para autorizar um novo provedor (ex: sinalpublicoetv.vercel.app).</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -6084,6 +8557,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   >
                     <Plus className="w-4 h-4" />
                     <span>Novo Destaque</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('football')}
+                    className="px-3.5 py-2 rounded-xl bg-[#090f20] hover:bg-[#0c142b] border border-blue-800/40 text-blue-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Acessar Agenda de Futebol para promover partidas a destaque"
+                  >
+                    <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="hidden sm:inline">Importar da Agenda</span>
                   </button>
                 </div>
               </div>
@@ -6526,6 +9008,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                     {/* Modal Form Body */}
                     <form onSubmit={handleSaveFeaturedItem} className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+                      {/* Integration with Agenda de Futebol */}
+                      <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-800/40 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <Trophy className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span className="text-slate-300">
+                            Deseja criar um destaque a partir de uma partida da <strong>Agenda de Futebol</strong>?
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsFeaturedModalOpen(false);
+                            setActiveSection('football');
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/40 text-blue-200 font-semibold cursor-pointer shrink-0"
+                        >
+                          Ver Agenda
+                        </button>
+                      </div>
+
                       {/* Title */}
                       <div>
                         <label className="block text-slate-300 font-semibold mb-1">
@@ -6756,6 +9258,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ================================================================ */}
+          {/* 14. AGENDA DE FUTEBOL E TRANSMISSÕES ESPORTIVAS                  */}
+          {/* ================================================================ */}
+          {activeSection === 'football' && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <FootballAgendaAdmin
+                channels={channels}
+                getAuthHeaders={getAuthHeaders}
+                triggerToast={triggerToast}
+                onCreateHighlightFromMatch={handleCreateHighlightFromFootballMatch}
+              />
             </div>
           )}
         </main>

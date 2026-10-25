@@ -18,7 +18,12 @@ import {
   DbFeaturedHighlight,
   DbFeaturedSettings,
   DbPrerollCampaign,
-  DbPrerollEvent
+  DbPrerollEvent,
+  DbInPlaySettings,
+  DbAuthorizedIframeDomain,
+  DbFootballTeam,
+  DbFootballMatch,
+  DbFootballAgendaSettings
 } from './schema.js';
 import { loadDatabase, saveDatabase } from './fileStorage.js';
 import { getPostgresPool, isPostgresActive } from './postgres.js';
@@ -474,14 +479,22 @@ export async function getChannels(onlyActive = false): Promise<DbChannel[]> {
       ...r,
       alternative_streams: typeof r.alternative_streams === 'string' ? JSON.parse(r.alternative_streams) : (r.alternative_streams || []),
       status: r.status || (r.is_active ? 'active' : 'inactive'),
-      access_permission: r.access_permission || (r.is_locked ? 'restricted' : 'free')
+      access_permission: r.access_permission || (r.is_locked ? 'restricted' : 'free'),
+      player_type: r.player_type || 'internal',
+      iframe_code: r.iframe_code || null,
+      iframe_url: r.iframe_url || null
     }));
   }
   const db = loadDatabase();
   const list = onlyActive 
     ? db.channels.filter(c => c.is_active && c.status !== 'inactive') 
     : db.channels;
-  return list.sort((a, b) => a.number - b.number);
+  return list.map(c => ({
+    ...c,
+    player_type: c.player_type || 'internal',
+    iframe_code: c.iframe_code || null,
+    iframe_url: c.iframe_url || null
+  })).sort((a, b) => a.number - b.number);
 }
 
 export async function getChannelById(id: string): Promise<DbChannel | null> {
@@ -499,11 +512,21 @@ export async function getChannelById(id: string): Promise<DbChannel | null> {
       ...r,
       alternative_streams: typeof r.alternative_streams === 'string' ? JSON.parse(r.alternative_streams) : (r.alternative_streams || []),
       status: r.status || (r.is_active ? 'active' : 'inactive'),
-      access_permission: r.access_permission || (r.is_locked ? 'restricted' : 'free')
+      access_permission: r.access_permission || (r.is_locked ? 'restricted' : 'free'),
+      player_type: r.player_type || 'internal',
+      iframe_code: r.iframe_code || null,
+      iframe_url: r.iframe_url || null
     };
   }
   const db = loadDatabase();
-  return db.channels.find(c => c.id === id) || null;
+  const found = db.channels.find(c => c.id === id);
+  if (!found) return null;
+  return {
+    ...found,
+    player_type: found.player_type || 'internal',
+    iframe_code: found.iframe_code || null,
+    iframe_url: found.iframe_url || null
+  };
 }
 
 export async function createChannel(channel: Omit<DbChannel, 'created_at' | 'updated_at'>): Promise<DbChannel> {
@@ -530,9 +553,10 @@ export async function createChannel(channel: Omit<DbChannel, 'created_at' | 'upd
            id, number, name, category_id, logo_url, backup_image_url, stream_url,
            alternative_streams, resolution, aspect_ratio, current_program, current_program_time,
            next_program, is_live, is_locked, is_featured, is_active, status, access_permission,
+           player_type, iframe_code, iframe_url,
            description, created_at, updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
         [
           newChan.id,
           newChan.number,
@@ -553,6 +577,9 @@ export async function createChannel(channel: Omit<DbChannel, 'created_at' | 'upd
           newChan.is_active,
           newChan.status,
           newChan.access_permission,
+          newChan.player_type || 'internal',
+          newChan.iframe_code || null,
+          newChan.iframe_url || null,
           newChan.description || '',
           newChan.created_at,
           newChan.updated_at
@@ -2759,3 +2786,881 @@ export async function getEligiblePrerollCampaign(params: {
   eligibleList.sort((a, b) => (b.priority || 0) - (a.priority || 0));
   return eligibleList[0];
 }
+
+// ==========================================
+// 20. BANNER IN-PLAY NO PLAYER DE VÍDEO
+// ==========================================
+
+export async function getInPlaySettings(): Promise<DbInPlaySettings> {
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query('SELECT * FROM inplay_settings WHERE id = $1 LIMIT 1', ['primary']);
+      if (res.rows[0]) {
+        const row = res.rows[0];
+        return {
+          id: row.id,
+          is_enabled: Boolean(row.is_enabled),
+          ad_format: row.ad_format || 'custom_banner',
+          ad_script_code: row.ad_script_code || '',
+          banner_image_url: row.banner_image_url || null,
+          banner_target_url: row.banner_target_url || null,
+          banner_title: row.banner_title || null,
+          position: row.position || 'bottom_center',
+          delay_seconds: Number(row.delay_seconds) || 10,
+          interval_minutes: Number(row.interval_minutes) || 5,
+          duration_seconds: Number(row.duration_seconds) || 25,
+          fade_out_seconds: Number(row.fade_out_seconds) || 1.0,
+          close_button_enabled: row.close_button_enabled !== false,
+          target_type: row.target_type || 'all',
+          target_channel_ids: Array.isArray(row.target_channel_ids) ? row.target_channel_ids : (typeof row.target_channel_ids === 'string' ? JSON.parse(row.target_channel_ids) : []),
+          target_category_ids: Array.isArray(row.target_category_ids) ? row.target_category_ids : (typeof row.target_category_ids === 'string' ? JSON.parse(row.target_category_ids) : []),
+          exempt_plan_ids: Array.isArray(row.exempt_plan_ids) ? row.exempt_plan_ids : (typeof row.exempt_plan_ids === 'string' ? JSON.parse(row.exempt_plan_ids) : []),
+          updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString()
+        };
+      }
+    } catch (err: any) {
+      console.warn('[InPlay] Failed to query PostgreSQL inplay_settings, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  return db.inplay_settings || {
+    id: 'primary',
+    is_enabled: true,
+    ad_format: 'custom_banner',
+    ad_script_code: '',
+    banner_image_url: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=728&h=90&q=80',
+    banner_target_url: 'https://virtarix.com.br',
+    banner_title: 'VPS Virtarix Cloud — Servidores Dedicados no Brasil',
+    position: 'bottom_center',
+    delay_seconds: 10,
+    interval_minutes: 5,
+    duration_seconds: 25,
+    fade_out_seconds: 1.0,
+    close_button_enabled: true,
+    target_type: 'all',
+    target_channel_ids: [],
+    target_category_ids: [],
+    exempt_plan_ids: ['plan_anual', 'plan_semestral'],
+    updated_at: new Date().toISOString()
+  };
+}
+
+export async function updateInPlaySettings(data: Partial<DbInPlaySettings>): Promise<DbInPlaySettings> {
+  const current = await getInPlaySettings();
+  const now = new Date().toISOString();
+
+  const updated: DbInPlaySettings = {
+    id: 'primary',
+    is_enabled: data.is_enabled !== undefined ? Boolean(data.is_enabled) : current.is_enabled,
+    ad_format: data.ad_format || current.ad_format || 'custom_banner',
+    ad_script_code: data.ad_script_code !== undefined ? data.ad_script_code : current.ad_script_code,
+    banner_image_url: data.banner_image_url !== undefined ? data.banner_image_url : current.banner_image_url,
+    banner_target_url: data.banner_target_url !== undefined ? data.banner_target_url : current.banner_target_url,
+    banner_title: data.banner_title !== undefined ? data.banner_title : current.banner_title,
+    position: data.position || current.position || 'bottom_center',
+    delay_seconds: data.delay_seconds !== undefined ? Math.max(3, Number(data.delay_seconds)) : current.delay_seconds,
+    interval_minutes: data.interval_minutes !== undefined ? Math.max(0, Number(data.interval_minutes)) : current.interval_minutes,
+    duration_seconds: data.duration_seconds !== undefined ? Math.max(5, Number(data.duration_seconds)) : current.duration_seconds,
+    fade_out_seconds: data.fade_out_seconds !== undefined ? Math.max(0.2, Number(data.fade_out_seconds)) : current.fade_out_seconds,
+    close_button_enabled: data.close_button_enabled !== undefined ? Boolean(data.close_button_enabled) : current.close_button_enabled,
+    target_type: data.target_type || current.target_type || 'all',
+    target_channel_ids: Array.isArray(data.target_channel_ids) ? data.target_channel_ids : current.target_channel_ids,
+    target_category_ids: Array.isArray(data.target_category_ids) ? data.target_category_ids : current.target_category_ids,
+    exempt_plan_ids: Array.isArray(data.exempt_plan_ids) ? data.exempt_plan_ids : current.exempt_plan_ids,
+    updated_at: now
+  };
+
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      await pool.query(
+        `INSERT INTO inplay_settings (
+          id, is_enabled, ad_format, ad_script_code, banner_image_url, banner_target_url,
+          banner_title, position, delay_seconds, interval_minutes, duration_seconds,
+          fade_out_seconds, close_button_enabled, target_type, target_channel_ids,
+          target_category_ids, exempt_plan_ids, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+        ) ON CONFLICT (id) DO UPDATE SET
+          is_enabled = EXCLUDED.is_enabled,
+          ad_format = EXCLUDED.ad_format,
+          ad_script_code = EXCLUDED.ad_script_code,
+          banner_image_url = EXCLUDED.banner_image_url,
+          banner_target_url = EXCLUDED.banner_target_url,
+          banner_title = EXCLUDED.banner_title,
+          position = EXCLUDED.position,
+          delay_seconds = EXCLUDED.delay_seconds,
+          interval_minutes = EXCLUDED.interval_minutes,
+          duration_seconds = EXCLUDED.duration_seconds,
+          fade_out_seconds = EXCLUDED.fade_out_seconds,
+          close_button_enabled = EXCLUDED.close_button_enabled,
+          target_type = EXCLUDED.target_type,
+          target_channel_ids = EXCLUDED.target_channel_ids,
+          target_category_ids = EXCLUDED.target_category_ids,
+          exempt_plan_ids = EXCLUDED.exempt_plan_ids,
+          updated_at = NOW()`,
+        [
+          updated.id,
+          updated.is_enabled,
+          updated.ad_format,
+          updated.ad_script_code,
+          updated.banner_image_url,
+          updated.banner_target_url,
+          updated.banner_title,
+          updated.position,
+          updated.delay_seconds,
+          updated.interval_minutes,
+          updated.duration_seconds,
+          updated.fade_out_seconds,
+          updated.close_button_enabled,
+          updated.target_type,
+          JSON.stringify(updated.target_channel_ids),
+          JSON.stringify(updated.target_category_ids),
+          JSON.stringify(updated.exempt_plan_ids),
+          now
+        ]
+      );
+    } catch (err: any) {
+      console.warn('[InPlay] Failed to update PostgreSQL inplay_settings, saving to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  db.inplay_settings = updated;
+  saveDatabase(db);
+  return updated;
+}
+
+export async function getEligibleInPlayBanner(params: {
+  channelId: string;
+  userEmail?: string | null;
+}): Promise<{ eligible: boolean; reason?: string; config?: any }> {
+  const { channelId, userEmail } = params;
+
+  // 1. Fetch channel info
+  const channel = await getChannelById(channelId);
+  if (!channel) {
+    return { eligible: false, reason: 'channel_not_found' };
+  }
+
+  // 2. Fetch inplay settings
+  const settings = await getInPlaySettings();
+  if (!settings.is_enabled) {
+    return { eligible: false, reason: 'inplay_disabled' };
+  }
+
+  // 3. Check subscriber plan exemption if user logged in
+  if (userEmail) {
+    const subs = await getSubscribers();
+    const subscriber = subs.find(s => s.email.toLowerCase() === userEmail.toLowerCase().trim());
+    if (subscriber) {
+      const isExpired = subscriber.expires_at ? new Date(subscriber.expires_at).getTime() < Date.now() : false;
+      const isActive = subscriber.status === 'active' && !isExpired;
+      if (isActive && subscriber.plan_id) {
+        const exemptPlans = settings.exempt_plan_ids || [];
+        if (exemptPlans.includes(subscriber.plan_id)) {
+          return { eligible: false, reason: 'subscriber_plan_exempt' };
+        }
+      }
+    }
+  }
+
+  // 4. Check channel / category segmentation
+  if (settings.target_type === 'channels') {
+    const channelIds = settings.target_channel_ids || [];
+    if (!channelIds.includes(channelId)) {
+      return { eligible: false, reason: 'channel_not_targeted' };
+    }
+  } else if (settings.target_type === 'categories') {
+    const categoryIds = settings.target_category_ids || [];
+    if (!categoryIds.includes(channel.category_id)) {
+      return { eligible: false, reason: 'category_not_targeted' };
+    }
+  }
+
+  // 5. Eligible! Return clean, sanitized config for the player
+  return {
+    eligible: true,
+    config: {
+      adFormat: settings.ad_format,
+      adScriptCode: settings.ad_script_code,
+      bannerImageUrl: settings.banner_image_url,
+      bannerTargetUrl: settings.banner_target_url,
+      bannerTitle: settings.banner_title,
+      position: settings.position,
+      delaySeconds: settings.delay_seconds,
+      intervalMinutes: settings.interval_minutes,
+      durationSeconds: settings.duration_seconds,
+      fadeOutSeconds: settings.fade_out_seconds,
+      closeButtonEnabled: settings.close_button_enabled
+    }
+  };
+}
+
+// ==========================================
+// 22. AUTHORIZED IFRAME DOMAINS (POSTGRESQL & LOCAL STORAGE)
+// ==========================================
+
+export async function getAuthorizedIframeDomains(): Promise<DbAuthorizedIframeDomain[]> {
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query(
+        'SELECT id, domain, is_active, added_by, created_at, updated_at FROM authorized_iframe_domains ORDER BY domain ASC'
+      );
+      return res.rows.map(row => ({
+        id: row.id,
+        domain: row.domain,
+        is_active: Boolean(row.is_active),
+        added_by: row.added_by,
+        created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+        updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString()
+      }));
+    } catch (err: any) {
+      console.warn('[Iframe Domains] Failed to read from PostgreSQL, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const list = db.authorized_iframe_domains || [];
+  return [...list].sort((a, b) => a.domain.localeCompare(b.domain));
+}
+
+export async function getActiveIframeDomains(): Promise<string[]> {
+  if (isPostgresActive()) {
+    try {
+      const res = await getPostgresPool()!.query(
+        'SELECT domain FROM authorized_iframe_domains WHERE is_active = true ORDER BY domain ASC'
+      );
+      if (res.rows.length > 0) {
+        return res.rows.map(r => r.domain.toLowerCase().trim());
+      }
+    } catch (err: any) {
+      console.warn('[Iframe Domains] Failed to get active domains from PostgreSQL, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const list = db.authorized_iframe_domains || [];
+  const active = list.filter(d => d.is_active).map(d => d.domain.toLowerCase().trim());
+  return active;
+}
+
+export async function addAuthorizedIframeDomain(domain: string, addedBy?: string | null): Promise<DbAuthorizedIframeDomain> {
+  const cleanDomain = domain.toLowerCase().trim();
+  const id = `dom_${cleanDomain.replace(/[^a-z0-9]/g, '_')}_${Date.now().toString(36)}`;
+  const now = new Date().toISOString();
+
+  const newDomain: DbAuthorizedIframeDomain = {
+    id,
+    domain: cleanDomain,
+    is_active: true,
+    added_by: addedBy || 'admin',
+    created_at: now,
+    updated_at: now
+  };
+
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      // Check if domain exists
+      const existing = await pool.query('SELECT * FROM authorized_iframe_domains WHERE LOWER(domain) = $1 LIMIT 1', [cleanDomain]);
+      if (existing.rows.length > 0) {
+        // If inactive, re-activate it
+        const row = existing.rows[0];
+        if (!row.is_active) {
+          const updated = await pool.query(
+            'UPDATE authorized_iframe_domains SET is_active = true, updated_at = NOW() WHERE id = $1 RETURNING *',
+            [row.id]
+          );
+          return {
+            id: updated.rows[0].id,
+            domain: updated.rows[0].domain,
+            is_active: true,
+            added_by: updated.rows[0].added_by,
+            created_at: new Date(updated.rows[0].created_at).toISOString(),
+            updated_at: new Date(updated.rows[0].updated_at).toISOString()
+          };
+        }
+        return {
+          id: row.id,
+          domain: row.domain,
+          is_active: Boolean(row.is_active),
+          added_by: row.added_by,
+          created_at: new Date(row.created_at).toISOString(),
+          updated_at: new Date(row.updated_at).toISOString()
+        };
+      }
+
+      const res = await pool.query(
+        `INSERT INTO authorized_iframe_domains (id, domain, is_active, added_by, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
+        [newDomain.id, newDomain.domain, newDomain.is_active, newDomain.added_by, now, now]
+      );
+      const row = res.rows[0];
+      return {
+        id: row.id,
+        domain: row.domain,
+        is_active: Boolean(row.is_active),
+        added_by: row.added_by,
+        created_at: new Date(row.created_at).toISOString(),
+        updated_at: new Date(row.updated_at).toISOString()
+      };
+    } catch (err: any) {
+      console.warn('[Iframe Domains] Failed to insert in PostgreSQL, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.authorized_iframe_domains) db.authorized_iframe_domains = [];
+
+  const existingIdx = db.authorized_iframe_domains.findIndex(d => d.domain.toLowerCase() === cleanDomain);
+  if (existingIdx >= 0) {
+    db.authorized_iframe_domains[existingIdx].is_active = true;
+    db.authorized_iframe_domains[existingIdx].updated_at = now;
+    saveDatabase(db);
+    return db.authorized_iframe_domains[existingIdx];
+  }
+
+  db.authorized_iframe_domains.push(newDomain);
+  saveDatabase(db);
+  return newDomain;
+}
+
+export async function toggleAuthorizedIframeDomain(id: string): Promise<DbAuthorizedIframeDomain | null> {
+  const now = new Date().toISOString();
+
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const res = await pool.query(
+        'UPDATE authorized_iframe_domains SET is_active = NOT is_active, updated_at = NOW() WHERE id = $1 RETURNING *',
+        [id]
+      );
+      if (res.rows.length > 0) {
+        const row = res.rows[0];
+        return {
+          id: row.id,
+          domain: row.domain,
+          is_active: Boolean(row.is_active),
+          added_by: row.added_by,
+          created_at: new Date(row.created_at).toISOString(),
+          updated_at: new Date(row.updated_at).toISOString()
+        };
+      }
+      return null;
+    } catch (err: any) {
+      console.warn('[Iframe Domains] Failed to toggle in PostgreSQL, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.authorized_iframe_domains) return null;
+  const item = db.authorized_iframe_domains.find(d => d.id === id);
+  if (!item) return null;
+  item.is_active = !item.is_active;
+  item.updated_at = now;
+  saveDatabase(db);
+  return item;
+}
+
+export async function deleteAuthorizedIframeDomain(id: string): Promise<boolean> {
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const res = await pool.query('DELETE FROM authorized_iframe_domains WHERE id = $1', [id]);
+      return (res.rowCount ?? 0) > 0;
+    } catch (err: any) {
+      console.warn('[Iframe Domains] Failed to delete in PostgreSQL, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.authorized_iframe_domains) return false;
+  const initialLength = db.authorized_iframe_domains.length;
+  db.authorized_iframe_domains = db.authorized_iframe_domains.filter(d => d.id !== id);
+  saveDatabase(db);
+  return db.authorized_iframe_domains.length < initialLength;
+}
+
+// ==========================================
+// 19. FOOTBALL TEAMS (AGENDA ESPORTIVA)
+// ==========================================
+export async function getFootballTeams(): Promise<DbFootballTeam[]> {
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const res = await pool.query('SELECT * FROM football_teams ORDER BY name ASC');
+      return res.rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        short_name: r.short_name,
+        logo_url: r.logo_url,
+        country: r.country,
+        created_at: new Date(r.created_at).toISOString(),
+        updated_at: new Date(r.updated_at).toISOString()
+      }));
+    } catch (err: any) {
+      console.warn('[Football Teams] PostgreSQL read error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  return (db.football_teams || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function getFootballTeamById(id: string): Promise<DbFootballTeam | null> {
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const res = await pool.query('SELECT * FROM football_teams WHERE id = $1 LIMIT 1', [id]);
+      if (res.rows.length > 0) {
+        const r = res.rows[0];
+        return {
+          id: r.id,
+          name: r.name,
+          short_name: r.short_name,
+          logo_url: r.logo_url,
+          country: r.country,
+          created_at: new Date(r.created_at).toISOString(),
+          updated_at: new Date(r.updated_at).toISOString()
+        };
+      }
+      return null;
+    } catch (err: any) {
+      console.warn('[Football Teams] PostgreSQL read error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  return (db.football_teams || []).find(t => t.id === id) || null;
+}
+
+export async function createFootballTeam(team: Omit<DbFootballTeam, 'id' | 'created_at' | 'updated_at'> & { id?: string }): Promise<DbFootballTeam> {
+  const now = new Date().toISOString();
+  const id = team.id || `team_${crypto.randomUUID().slice(0, 8)}`;
+  const newTeam: DbFootballTeam = {
+    id,
+    name: team.name.trim(),
+    short_name: team.short_name?.trim() || null,
+    logo_url: team.logo_url.trim(),
+    country: team.country?.trim() || 'Brasil',
+    created_at: now,
+    updated_at: now
+  };
+
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const res = await pool.query(
+        `INSERT INTO football_teams (id, name, short_name, logo_url, country, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *`,
+        [newTeam.id, newTeam.name, newTeam.short_name, newTeam.logo_url, newTeam.country, now, now]
+      );
+      const r = res.rows[0];
+      return {
+        id: r.id,
+        name: r.name,
+        short_name: r.short_name,
+        logo_url: r.logo_url,
+        country: r.country,
+        created_at: new Date(r.created_at).toISOString(),
+        updated_at: new Date(r.updated_at).toISOString()
+      };
+    } catch (err: any) {
+      console.warn('[Football Teams] PostgreSQL insert error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.football_teams) db.football_teams = [];
+  db.football_teams.push(newTeam);
+  saveDatabase(db);
+  return newTeam;
+}
+
+export async function updateFootballTeam(id: string, updates: Partial<DbFootballTeam>): Promise<DbFootballTeam | null> {
+  const now = new Date().toISOString();
+
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const fields: string[] = [];
+      const values: any[] = [];
+      let idx = 1;
+
+      for (const [key, val] of Object.entries(updates)) {
+        if (key === 'id' || key === 'created_at') continue;
+        fields.push(`${key} = $${idx}`);
+        values.push(val);
+        idx++;
+      }
+      fields.push(`updated_at = $${idx}`);
+      values.push(now);
+
+      const query = `UPDATE football_teams SET ${fields.join(', ')} WHERE id = $${idx + 1} RETURNING *`;
+      values.push(id);
+
+      const res = await pool.query(query, values);
+      if (res.rows.length > 0) {
+        const r = res.rows[0];
+        return {
+          id: r.id,
+          name: r.name,
+          short_name: r.short_name,
+          logo_url: r.logo_url,
+          country: r.country,
+          created_at: new Date(r.created_at).toISOString(),
+          updated_at: new Date(r.updated_at).toISOString()
+        };
+      }
+      return null;
+    } catch (err: any) {
+      console.warn('[Football Teams] PostgreSQL update error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.football_teams) return null;
+  const index = db.football_teams.findIndex(t => t.id === id);
+  if (index === -1) return null;
+
+  db.football_teams[index] = { ...db.football_teams[index], ...updates, updated_at: now };
+  saveDatabase(db);
+  return db.football_teams[index];
+}
+
+export async function deleteFootballTeam(id: string): Promise<boolean> {
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const res = await pool.query('DELETE FROM football_teams WHERE id = $1', [id]);
+      return (res.rowCount ?? 0) > 0;
+    } catch (err: any) {
+      console.warn('[Football Teams] PostgreSQL delete error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.football_teams) return false;
+  const initialLength = db.football_teams.length;
+  db.football_teams = db.football_teams.filter(t => t.id !== id);
+  saveDatabase(db);
+  return db.football_teams.length < initialLength;
+}
+
+// ==========================================
+// 20. FOOTBALL MATCHES (AGENDA ESPORTIVA)
+// ==========================================
+function mapMatchRow(r: any): DbFootballMatch {
+  let channels = [];
+  if (r.channel_ids) {
+    channels = typeof r.channel_ids === 'string' ? JSON.parse(r.channel_ids) : r.channel_ids;
+  } else if (r.channels) {
+    channels = typeof r.channels === 'string' ? JSON.parse(r.channels) : r.channels;
+  }
+
+  return {
+    id: r.id,
+    competition: r.competition,
+    competition_country: r.competition_country,
+    round: r.round,
+    home_team_id: r.home_team_id,
+    home_team_name: r.home_team_name,
+    home_team_logo: r.home_team_logo,
+    away_team_id: r.away_team_id,
+    away_team_name: r.away_team_name,
+    away_team_logo: r.away_team_logo,
+    match_date: typeof r.match_date === 'string' ? r.match_date.slice(0, 10) : new Date(r.match_date).toISOString().slice(0, 10),
+    match_time: r.match_time,
+    timezone: r.timezone || 'America/Sao_Paulo',
+    description: r.description,
+    channels: Array.isArray(channels) ? channels : [],
+    primary_channel_id: r.primary_channel_id,
+    status: r.status,
+    score_home: r.score_home !== null && r.score_home !== undefined ? parseInt(r.score_home, 10) : null,
+    score_away: r.score_away !== null && r.score_away !== undefined ? parseInt(r.score_away, 10) : null,
+    minute: r.minute,
+    is_active: Boolean(r.is_active),
+    is_featured: Boolean(r.is_featured),
+    display_order: parseInt(r.display_order || '1', 10),
+    created_at: new Date(r.created_at).toISOString(),
+    updated_at: new Date(r.updated_at).toISOString()
+  };
+}
+
+export async function getFootballMatches(includeInactive = false): Promise<DbFootballMatch[]> {
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const query = includeInactive
+        ? 'SELECT * FROM football_matches ORDER BY display_order ASC, match_date ASC, match_time ASC'
+        : 'SELECT * FROM football_matches WHERE is_active = true ORDER BY display_order ASC, match_date ASC, match_time ASC';
+      const res = await pool.query(query);
+      return res.rows.map(mapMatchRow);
+    } catch (err: any) {
+      console.warn('[Football Matches] PostgreSQL read error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  const list = db.football_matches || [];
+  return (includeInactive ? list : list.filter(m => m.is_active))
+    .slice()
+    .sort((a, b) => {
+      if (a.display_order !== b.display_order) return a.display_order - b.display_order;
+      if (a.match_date !== b.match_date) return a.match_date.localeCompare(b.match_date);
+      return a.match_time.localeCompare(b.match_time);
+    });
+}
+
+export async function getFootballMatchById(id: string): Promise<DbFootballMatch | null> {
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const res = await pool.query('SELECT * FROM football_matches WHERE id = $1 LIMIT 1', [id]);
+      if (res.rows.length > 0) {
+        return mapMatchRow(res.rows[0]);
+      }
+      return null;
+    } catch (err: any) {
+      console.warn('[Football Matches] PostgreSQL read error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  return (db.football_matches || []).find(m => m.id === id) || null;
+}
+
+export async function createFootballMatch(match: Omit<DbFootballMatch, 'id' | 'created_at' | 'updated_at'> & { id?: string }): Promise<DbFootballMatch> {
+  const now = new Date().toISOString();
+  const id = match.id || `match_${crypto.randomUUID().slice(0, 10)}`;
+
+  const newMatch: DbFootballMatch = {
+    ...match,
+    id,
+    created_at: now,
+    updated_at: now
+  };
+
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const res = await pool.query(
+        `INSERT INTO football_matches (
+           id, competition, competition_country, round,
+           home_team_id, home_team_name, home_team_logo,
+           away_team_id, away_team_name, away_team_logo,
+           match_date, match_time, timezone, description,
+           channel_ids, primary_channel_id, status,
+           score_home, score_away, minute,
+           is_active, is_featured, display_order, created_at, updated_at
+         ) VALUES (
+           $1, $2, $3, $4,
+           $5, $6, $7,
+           $8, $9, $10,
+           $11, $12, $13, $14,
+           $15, $16, $17,
+           $18, $19, $20,
+           $21, $22, $23, $24, $25
+         ) RETURNING *`,
+        [
+          newMatch.id, newMatch.competition, newMatch.competition_country, newMatch.round,
+          newMatch.home_team_id, newMatch.home_team_name, newMatch.home_team_logo,
+          newMatch.away_team_id, newMatch.away_team_name, newMatch.away_team_logo,
+          newMatch.match_date, newMatch.match_time, newMatch.timezone, newMatch.description,
+          JSON.stringify(newMatch.channels), newMatch.primary_channel_id, newMatch.status,
+          newMatch.score_home, newMatch.score_away, newMatch.minute,
+          newMatch.is_active, newMatch.is_featured, newMatch.display_order, now, now
+        ]
+      );
+      return mapMatchRow(res.rows[0]);
+    } catch (err: any) {
+      console.warn('[Football Matches] PostgreSQL insert error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.football_matches) db.football_matches = [];
+  db.football_matches.push(newMatch);
+  saveDatabase(db);
+  return newMatch;
+}
+
+export async function updateFootballMatch(id: string, updates: Partial<DbFootballMatch>): Promise<DbFootballMatch | null> {
+  const now = new Date().toISOString();
+
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const fields: string[] = [];
+      const values: any[] = [];
+      let idx = 1;
+
+      for (const [key, val] of Object.entries(updates)) {
+        if (key === 'id' || key === 'created_at') continue;
+        if (key === 'channels') {
+          fields.push(`channel_ids = $${idx}`);
+          values.push(JSON.stringify(val));
+        } else {
+          fields.push(`${key} = $${idx}`);
+          values.push(val);
+        }
+        idx++;
+      }
+      fields.push(`updated_at = $${idx}`);
+      values.push(now);
+
+      const query = `UPDATE football_matches SET ${fields.join(', ')} WHERE id = $${idx + 1} RETURNING *`;
+      values.push(id);
+
+      const res = await pool.query(query, values);
+      if (res.rows.length > 0) {
+        return mapMatchRow(res.rows[0]);
+      }
+      return null;
+    } catch (err: any) {
+      console.warn('[Football Matches] PostgreSQL update error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.football_matches) return null;
+  const index = db.football_matches.findIndex(m => m.id === id);
+  if (index === -1) return null;
+
+  db.football_matches[index] = { ...db.football_matches[index], ...updates, updated_at: now };
+  saveDatabase(db);
+  return db.football_matches[index];
+}
+
+export async function deleteFootballMatch(id: string): Promise<boolean> {
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const res = await pool.query('DELETE FROM football_matches WHERE id = $1', [id]);
+      return (res.rowCount ?? 0) > 0;
+    } catch (err: any) {
+      console.warn('[Football Matches] PostgreSQL delete error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  if (!db.football_matches) return false;
+  const initialLength = db.football_matches.length;
+  db.football_matches = db.football_matches.filter(m => m.id !== id);
+  saveDatabase(db);
+  return db.football_matches.length < initialLength;
+}
+
+export async function duplicateFootballMatch(id: string): Promise<DbFootballMatch | null> {
+  const original = await getFootballMatchById(id);
+  if (!original) return null;
+
+  const newId = `match_${crypto.randomUUID().slice(0, 10)}`;
+  const duplicated: Omit<DbFootballMatch, 'id' | 'created_at' | 'updated_at'> = {
+    ...original,
+    competition: `${original.competition} (Cópia)`,
+    display_order: original.display_order + 1,
+    is_active: false
+  };
+
+  return createFootballMatch({ ...duplicated, id: newId });
+}
+
+export async function toggleFootballMatchActive(id: string): Promise<DbFootballMatch | null> {
+  const match = await getFootballMatchById(id);
+  if (!match) return null;
+  return updateFootballMatch(id, { is_active: !match.is_active });
+}
+
+// ==========================================
+// 21. FOOTBALL AGENDA SETTINGS
+// ==========================================
+export async function getFootballAgendaSettings(): Promise<DbFootballAgendaSettings> {
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const res = await pool.query('SELECT * FROM football_agenda_settings WHERE id = $1 LIMIT 1', ['primary']);
+      if (res.rows.length > 0) {
+        const r = res.rows[0];
+        return {
+          id: r.id,
+          is_enabled: Boolean(r.is_enabled),
+          days_to_display: parseInt(r.days_to_display, 10),
+          hide_finished_after_hours: parseInt(r.hide_finished_after_hours, 10),
+          default_view_mode: r.default_view_mode,
+          updated_at: new Date(r.updated_at).toISOString()
+        };
+      }
+    } catch (err: any) {
+      console.warn('[Football Settings] PostgreSQL read error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  return db.football_agenda_settings || {
+    id: 'primary',
+    is_enabled: true,
+    days_to_display: 7,
+    hide_finished_after_hours: 3,
+    default_view_mode: 'live_first',
+    updated_at: new Date().toISOString()
+  };
+}
+
+export async function updateFootballAgendaSettings(updates: Partial<DbFootballAgendaSettings>): Promise<DbFootballAgendaSettings> {
+  const now = new Date().toISOString();
+
+  if (isPostgresActive()) {
+    try {
+      const pool = getPostgresPool()!;
+      const fields: string[] = [];
+      const values: any[] = [];
+      let idx = 1;
+
+      for (const [key, val] of Object.entries(updates)) {
+        if (key === 'id') continue;
+        fields.push(`${key} = $${idx}`);
+        values.push(val);
+        idx++;
+      }
+      fields.push(`updated_at = $${idx}`);
+      values.push(now);
+
+      const query = `UPDATE football_agenda_settings SET ${fields.join(', ')} WHERE id = 'primary' RETURNING *`;
+      const res = await pool.query(query, values);
+      if (res.rows.length > 0) {
+        const r = res.rows[0];
+        return {
+          id: r.id,
+          is_enabled: Boolean(r.is_enabled),
+          days_to_display: parseInt(r.days_to_display, 10),
+          hide_finished_after_hours: parseInt(r.hide_finished_after_hours, 10),
+          default_view_mode: r.default_view_mode,
+          updated_at: new Date(r.updated_at).toISOString()
+        };
+      }
+    } catch (err: any) {
+      console.warn('[Football Settings] PostgreSQL update error, fallback to storage:', err.message);
+    }
+  }
+
+  const db = loadDatabase();
+  db.football_agenda_settings = {
+    ...(db.football_agenda_settings || {
+      id: 'primary',
+      is_enabled: true,
+      days_to_display: 7,
+      hide_finished_after_hours: 3,
+      default_view_mode: 'live_first'
+    }),
+    ...updates,
+    updated_at: now
+  };
+  saveDatabase(db);
+  return db.football_agenda_settings;
+}
+

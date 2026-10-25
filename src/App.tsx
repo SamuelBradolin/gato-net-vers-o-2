@@ -8,7 +8,8 @@ import {
   PaymentSettings,
   UserSubscriber,
   FeaturedHighlight,
-  FeaturedSettings
+  FeaturedSettings,
+  FootballMatch
 } from './types';
 import {
   INITIAL_CATEGORIES,
@@ -45,13 +46,16 @@ export default function App() {
     maxActiveHighlights: 6,
     playbackBannerEnabled: true
   });
+  const [footballMatches, setFootballMatches] = useState<FootballMatch[]>([]);
 
   // Selected Channel state: Starts as null so stream does not start automatically
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
 
-  // Filter & Search states
+  // Filter & Search states (REGRA PRINCIPAL: Futebol Ao Vivo selecionado por padrão)
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeCategoryId, setActiveCategoryId] = useState('cat_all');
+  const [activeCategoryId, setActiveCategoryId] = useState(
+    INITIAL_SYSTEM_SETTINGS.defaultHomeTab || 'cat_football'
+  );
   const [favorites, setFavorites] = useState<string[]>(['ch_globo', 'ch_gato_esportes_1']);
 
   // Modals & Navigation Views
@@ -209,13 +213,21 @@ export default function App() {
   // Synchronize dynamic channels and settings from server/PostgreSQL
   const refreshPublicData = useCallback(async () => {
     try {
-      const [channelsRes, categoriesRes, settingsRes, plansRes, featuredRes] = await Promise.all([
+      const [channelsRes, categoriesRes, settingsRes, plansRes, featuredRes, footballRes] = await Promise.all([
         fetch('/api/public/channels').catch(() => null),
         fetch('/api/public/categories').catch(() => null),
         fetch('/api/public/settings').catch(() => null),
         fetch('/api/public/plans').catch(() => null),
-        fetch('/api/public/featured').catch(() => null)
+        fetch('/api/public/featured').catch(() => null),
+        fetch('/api/public/football/matches').catch(() => null)
       ]);
+
+      if (footballRes && footballRes.ok) {
+        const matchesData = await footballRes.json();
+        if (Array.isArray(matchesData)) {
+          setFootballMatches(matchesData);
+        }
+      }
 
       if (featuredRes && featuredRes.ok) {
         const featData = await featuredRes.json();
@@ -249,6 +261,9 @@ export default function App() {
               isLive: c.is_live,
               isLocked: c.is_locked,
               featured: c.is_featured,
+              playerType: c.player_type || 'internal',
+              iframeCode: c.iframe_code || null,
+              iframeUrl: c.iframe_url || null,
               description: c.description
             }))
           );
@@ -258,15 +273,17 @@ export default function App() {
       if (categoriesRes && categoriesRes.ok) {
         const dbCats = await categoriesRes.json();
         if (Array.isArray(dbCats) && dbCats.length > 0) {
-          const allCat: Category = { id: 'cat_all', name: 'Todos os Canais', slug: 'todos', order: 0, iconName: 'Layers' };
-          const mappedCats: Category[] = dbCats.map((cat: any) => ({
+          const footballCat: Category = { id: 'cat_football', name: 'Futebol Ao Vivo', slug: 'futebol-ao-vivo', order: 0, iconName: 'Trophy' };
+          const allCat: Category = { id: 'cat_all', name: 'Todos os Canais', slug: 'todos', order: 1, iconName: 'Layers' };
+          const otherCats = dbCats.filter((cat: any) => cat.id !== 'cat_all' && cat.id !== 'cat_football' && cat.slug !== 'todos');
+          const mappedCats: Category[] = otherCats.map((cat: any) => ({
             id: cat.id,
             name: cat.name,
             slug: cat.slug,
             order: cat.display_order,
             iconName: cat.icon_name
           }));
-          setCategories([allCat, ...mappedCats]);
+          setCategories([footballCat, allCat, ...mappedCats]);
         }
       }
 
@@ -311,7 +328,8 @@ export default function App() {
             accessMode: s.accessMode || prev.accessMode,
             allowPublicChannelBrowse: s.allowPublicBrowse !== undefined ? s.allowPublicBrowse : prev.allowPublicChannelBrowse,
             maxSimultaneousStreams: s.maxSimultaneousStreams || prev.maxSimultaneousStreams,
-            streamRelayEnabled: s.streamRelayEnabled !== undefined ? s.streamRelayEnabled : prev.streamRelayEnabled
+            streamRelayEnabled: s.streamRelayEnabled !== undefined ? s.streamRelayEnabled : prev.streamRelayEnabled,
+            defaultHomeTab: s.defaultHomeTab || prev.defaultHomeTab
           }));
         }
         if (s.adSlots && Array.isArray(s.adSlots)) {
@@ -325,7 +343,12 @@ export default function App() {
               targetUrl: ad.target_url,
               dimensions: ad.dimensions,
               codeSnippet: ad.code_snippet,
-              isEnabled: ad.is_enabled
+              isEnabled: ad.is_enabled,
+              adType: ad.ad_type || (ad.image_url ? 'image_url' : (ad.code_snippet ? 'code_script' : 'none')),
+              advertiserName: ad.advertiser_name || '',
+              altText: ad.alt_text || '',
+              openInNewTab: ad.open_in_new_tab !== undefined ? ad.open_in_new_tab : true,
+              showPlaceholderWhenEmpty: ad.show_placeholder_when_empty !== undefined ? ad.show_placeholder_when_empty : false
             }))
           );
         }
@@ -484,6 +507,8 @@ export default function App() {
           onSelectCategory={setActiveCategoryId}
           isAccessModeSubscription={systemSettings.accessMode === 'subscription'}
           userHasSubscription={userHasSubscription}
+          footballMatches={footballMatches}
+          onWatchFootballChannel={handleSelectQuickChannel}
         />
       </main>
 

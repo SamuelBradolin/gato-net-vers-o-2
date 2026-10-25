@@ -53,6 +53,9 @@ export interface Channel {
   backupImage: string;
   status?: 'active' | 'inactive' | 'maintenance';
   accessPermission?: 'free' | 'restricted';
+  playerType?: 'internal' | 'external_iframe';
+  iframeCode?: string | null;
+  iframeUrl?: string | null;
 }
 
 export interface ManualPaymentOrder {
@@ -116,6 +119,8 @@ export interface SubscriptionPlan {
 
 export type AdSlotType = 'header' | 'player_side' | 'player_bottom' | 'inter_categories' | 'footer';
 
+export type AdContentType = 'none' | 'image_upload' | 'image_url' | 'code_script';
+
 export interface AdSlot {
   id: string;
   slotType: AdSlotType;
@@ -126,6 +131,13 @@ export interface AdSlot {
   isEnabled: boolean;
   dimensions: string;
   codeSnippet?: string;
+  adType?: AdContentType;
+  advertiserName?: string;
+  altText?: string;
+  openInNewTab?: boolean;
+  showPlaceholderWhenEmpty?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface PixConfig {
@@ -169,6 +181,8 @@ export interface SystemSettings {
   maxSimultaneousStreams: number;
   vpsSpecs: VpsSpecs;
   streamRelayEnabled: boolean;
+  allowedIframeDomains?: string[];
+  defaultHomeTab?: string;
 }
 
 export interface PlaybackSessionItem {
@@ -303,3 +317,112 @@ export interface PrerollEligibilityResult {
   eligible: boolean;
   ad: EligiblePrerollAd | null;
 }
+
+export type InPlayTargetType = 'all' | 'channels' | 'categories';
+export type InPlayPosition = 'bottom_center' | 'bottom_left' | 'bottom_right';
+export type InPlayAdFormat = 'script' | 'custom_banner';
+
+export interface InPlaySettings {
+  id: string;
+  isEnabled: boolean;
+  adFormat: InPlayAdFormat;
+  adScriptCode: string;
+  bannerImageUrl?: string | null;
+  bannerTargetUrl?: string | null;
+  bannerTitle?: string | null;
+  position: InPlayPosition;
+  delaySeconds: number;
+  intervalMinutes: number;
+  durationSeconds: number;
+  fadeOutSeconds: number;
+  closeButtonEnabled: boolean;
+  targetType: InPlayTargetType;
+  targetChannelIds: string[];
+  targetCategoryIds: string[];
+  exemptPlanIds: string[];
+  updatedAt?: string;
+}
+
+export interface InPlayEligibilityResult {
+  eligible: boolean;
+  reason?: string;
+  config?: {
+    adFormat: InPlayAdFormat;
+    adScriptCode: string;
+    bannerImageUrl?: string | null;
+    bannerTargetUrl?: string | null;
+    bannerTitle?: string | null;
+    position: InPlayPosition;
+    delaySeconds: number;
+    intervalMinutes: number;
+    durationSeconds: number;
+    fadeOutSeconds: number;
+    closeButtonEnabled: boolean;
+  } | null;
+}
+
+export interface AuthorizedIframeDomain {
+  id: string;
+  domain: string;
+  isActive: boolean;
+  addedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MatchStatus = 'scheduled' | 'live' | 'finished' | 'postponed' | 'cancelled';
+
+export interface FootballTeam {
+  id: string;
+  name: string;
+  shortName?: string | null;
+  logoUrl: string;
+  country?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface FootballMatchChannel {
+  channelId: string;
+  channelName: string;
+  channelNumber?: number;
+  isPrimary?: boolean;
+}
+
+export interface FootballMatch {
+  id: string;
+  competition: string;
+  competitionCountry?: string | null;
+  round?: string | null;
+  homeTeamId?: string | null;
+  homeTeamName: string;
+  homeTeamLogo: string;
+  awayTeamId?: string | null;
+  awayTeamName: string;
+  awayTeamLogo: string;
+  matchDate: string; // YYYY-MM-DD
+  matchTime: string; // HH:MM
+  timezone: string; // e.g. 'America/Sao_Paulo'
+  description?: string | null;
+  channels: FootballMatchChannel[];
+  primaryChannelId?: string | null;
+  status: MatchStatus;
+  scoreHome?: number | null;
+  scoreAway?: number | null;
+  minute?: string | null;
+  isActive: boolean;
+  isFeatured: boolean;
+  displayOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface FootballAgendaSettings {
+  id: string;
+  isEnabled: boolean;
+  daysToDisplay: number;
+  hideFinishedAfterHours: number;
+  defaultViewMode: 'live_first' | 'chronological';
+  updatedAt?: string;
+}
+

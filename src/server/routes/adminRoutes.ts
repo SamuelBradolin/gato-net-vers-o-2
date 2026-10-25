@@ -48,10 +48,31 @@ import {
   createPrerollCampaign,
   updatePrerollCampaign,
   deletePrerollCampaign,
-  resetPrerollStats
+  resetPrerollStats,
+  getInPlaySettings,
+  updateInPlaySettings,
+  getAuthorizedIframeDomains,
+  getActiveIframeDomains,
+  addAuthorizedIframeDomain,
+  toggleAuthorizedIframeDomain,
+  deleteAuthorizedIframeDomain,
+  getFootballMatches,
+  getFootballMatchById,
+  createFootballMatch,
+  updateFootballMatch,
+  deleteFootballMatch,
+  duplicateFootballMatch,
+  toggleFootballMatchActive,
+  getFootballTeams,
+  getFootballTeamById,
+  createFootballTeam,
+  updateFootballTeam,
+  deleteFootballTeam,
+  getFootballAgendaSettings,
+  updateFootballAgendaSettings
 } from '../db/repository.js';
-import { DbAppearanceConfigs, DbAccessModes, DbFeaturedHighlight, DbFeaturedSettings, DbPrerollCampaign } from '../db/schema.js';
-import { validateStreamUrl } from '../utils/security.js';
+import { DbAppearanceConfigs, DbAccessModes, DbFeaturedHighlight, DbFeaturedSettings, DbPrerollCampaign, DbInPlaySettings, DbAdSlot } from '../db/schema.js';
+import { validateStreamUrl, validateIframeCode, validateDomainInput, DEFAULT_ALLOWED_IFRAME_DOMAINS } from '../utils/security.js';
 import { isPostgresActive } from '../db/postgres.js';
 
 const router = Router();
@@ -72,6 +93,154 @@ router.get('/admin/channels', async (_req: AuthenticatedRequest, res: Response) 
   }
 });
 
+router.post('/admin/channels/validate-iframe', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const rawCode = req.body.iframe_code || req.body.iframeCode;
+    const activeDomains = await getActiveIframeDomains();
+    const result = validateIframeCode(rawCode, activeDomains);
+    res.json({
+      valid: result.isValid,
+      domain: result.hostname,
+      safeUrl: result.iframeUrl,
+      ...result
+    });
+  } catch (err: any) {
+    res.status(500).json({ valid: false, isValid: false, error: 'Erro ao validar código do iframe' });
+  }
+});
+
+router.get('/admin/iframe-domains', async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const domains = await getAuthorizedIframeDomains();
+    const activeDomains = await getActiveIframeDomains();
+    res.json({ domains, activeDomains, defaultDomains: DEFAULT_ALLOWED_IFRAME_DOMAINS });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao carregar domínios autorizados' });
+  }
+});
+
+router.post('/admin/iframe-domains', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { domain } = req.body;
+    if (!domain) {
+      res.status(400).json({ error: 'O domínio é obrigatório.' });
+      return;
+    }
+
+    const validation = validateDomainInput(domain);
+    if (!validation.isValid || !validation.normalized) {
+      res.status(400).json({ error: validation.error || 'Domínio inválido.' });
+      return;
+    }
+
+    const newDomain = await addAuthorizedIframeDomain(validation.normalized, req.admin?.email || 'admin');
+
+    await createAuditLog(
+      req.admin!.id,
+      req.admin!.email,
+      'ADD_AUTHORIZED_IFRAME_DOMAIN',
+      'authorized_iframe_domains',
+      newDomain.id,
+      { domain: newDomain.domain, is_active: newDomain.is_active },
+      req.ip || null
+    );
+
+    res.status(201).json(newDomain);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao autorizar novo domínio' });
+  }
+});
+
+router.patch('/admin/iframe-domains/:id/toggle', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const updated = await toggleAuthorizedIframeDomain(id);
+    if (!updated) {
+      res.status(404).json({ error: 'Domínio não encontrado' });
+      return;
+    }
+
+    await createAuditLog(
+      req.admin!.id,
+      req.admin!.email,
+      'TOGGLE_AUTHORIZED_IFRAME_DOMAIN',
+      'authorized_iframe_domains',
+      id,
+      { domain: updated.domain, is_active: updated.is_active },
+      req.ip || null
+    );
+
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao alternar status do domínio' });
+  }
+});
+
+router.delete('/admin/iframe-domains/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const domains = await getAuthorizedIframeDomains();
+    const existing = domains.find(d => d.id === id);
+    if (!existing) {
+      res.status(404).json({ error: 'Domínio não encontrado' });
+      return;
+    }
+
+    const success = await deleteAuthorizedIframeDomain(id);
+    if (!success) {
+      res.status(404).json({ error: 'Domínio não encontrado ou já removido' });
+      return;
+    }
+
+    await createAuditLog(
+      req.admin!.id,
+      req.admin!.email,
+      'DELETE_AUTHORIZED_IFRAME_DOMAIN',
+      'authorized_iframe_domains',
+      id,
+      { domain: existing.domain },
+      req.ip || null
+    );
+
+    res.json({ success: true, message: `Domínio "${existing.domain}" removido com sucesso.` });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao remover domínio autorizado' });
+  }
+});
+
+router.put('/admin/iframe-domains', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const rawDomains = req.body.domains || req.body.allowedIframeDomains;
+    if (!Array.isArray(rawDomains)) {
+      res.status(400).json({ error: 'Lista de domínios inválida' });
+      return;
+    }
+    const sanitized = rawDomains.map((d: any) => String(d).trim().toLowerCase()).filter(Boolean);
+    const updated = await updateAccessModes({ allowed_iframe_domains: sanitized });
+
+    // Sync each to authorized_iframe_domains table
+    for (const d of sanitized) {
+      const val = validateDomainInput(d);
+      if (val.isValid && val.normalized) {
+        await addAuthorizedIframeDomain(val.normalized, req.admin?.email || 'admin');
+      }
+    }
+
+    await createAuditLog(
+      req.admin!.id,
+      req.admin!.email,
+      'UPDATE_ALLOWED_IFRAME_DOMAINS',
+      'access_modes',
+      'primary',
+      { allowed_domains: sanitized },
+      req.ip || null
+    );
+    res.json({ success: true, domains: updated.allowed_iframe_domains });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao salvar domínios autorizados' });
+  }
+});
+
 router.post('/admin/channels', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const {
@@ -88,19 +257,54 @@ router.post('/admin/channels', async (req: AuthenticatedRequest, res: Response) 
       status,
       access_permission,
       is_locked,
-      description
+      description,
+      player_type,
+      iframe_code
     } = req.body;
 
-    if (!name || !category_id || !stream_url) {
-      res.status(400).json({ error: 'Nome, categoria e URL de transmissão são obrigatórios' });
+    const playerType = player_type === 'external_iframe' ? 'external_iframe' : 'internal';
+
+    if (!name || !category_id) {
+      res.status(400).json({ error: 'Nome e categoria são obrigatórios' });
       return;
     }
 
-    // SSRF Security Validation on Primary Stream URL
-    const mainUrlCheck = validateStreamUrl(stream_url);
-    if (!mainUrlCheck.isValid) {
-      res.status(400).json({ error: `URL Principal inválida: ${mainUrlCheck.error}` });
-      return;
+    let finalStreamUrl = stream_url ? String(stream_url).trim() : '';
+    let validatedIframeUrl: string | null = null;
+    let validatedIframeCode: string | null = null;
+
+    if (playerType === 'external_iframe') {
+      if (!iframe_code || !String(iframe_code).trim()) {
+        res.status(400).json({ error: 'O Código HTML do iframe é obrigatório para canais com Player Externo.' });
+        return;
+      }
+
+      const allowedDomains = await getActiveIframeDomains();
+      const iframeCheck = validateIframeCode(iframe_code, allowedDomains);
+
+      if (!iframeCheck.isValid) {
+        res.status(400).json({ error: iframeCheck.error });
+        return;
+      }
+
+      validatedIframeUrl = iframeCheck.iframeUrl!;
+      validatedIframeCode = iframeCheck.sanitizedCode!;
+      if (!finalStreamUrl) {
+        finalStreamUrl = iframeCheck.iframeUrl!;
+      }
+    } else {
+      if (!stream_url) {
+        res.status(400).json({ error: 'URL de transmissão é obrigatória para Player Interno' });
+        return;
+      }
+
+      // SSRF Security Validation on Primary Stream URL
+      const mainUrlCheck = validateStreamUrl(stream_url);
+      if (!mainUrlCheck.isValid) {
+        res.status(400).json({ error: `URL Principal inválida: ${mainUrlCheck.error}` });
+        return;
+      }
+      finalStreamUrl = mainUrlCheck.normalizedUrl!;
     }
 
     // SSRF Security Validation on Alternative Stream URLs
@@ -142,7 +346,7 @@ router.post('/admin/channels', async (req: AuthenticatedRequest, res: Response) 
       category_id,
       logo_url: logo_url || 'https://images.unsplash.com/photo-1598899134739-24c46f58b8c0?auto=format&fit=crop&w=160&q=80',
       backup_image_url: '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
-      stream_url: mainUrlCheck.normalizedUrl!,
+      stream_url: finalStreamUrl,
       alternative_streams: validatedAlternativeStreams,
       resolution: resolution || '1080p',
       aspect_ratio: aspect_ratio || '16:9',
@@ -153,6 +357,9 @@ router.post('/admin/channels', async (req: AuthenticatedRequest, res: Response) 
       is_locked: accessPerm === 'restricted',
       status: channelStatus,
       access_permission: accessPerm,
+      player_type: playerType,
+      iframe_code: validatedIframeCode,
+      iframe_url: validatedIframeUrl,
       is_featured: false,
       is_active: channelStatus !== 'inactive',
       description: description ? description.trim() : 'Canal cadastrado na grade oficial da Gato Net.'
@@ -164,7 +371,13 @@ router.post('/admin/channels', async (req: AuthenticatedRequest, res: Response) 
       'CREATE_CHANNEL',
       'channels',
       newChan.id,
-      { name: newChan.name, number: newChan.number, status: newChan.status, access_permission: newChan.access_permission },
+      {
+        name: newChan.name,
+        number: newChan.number,
+        player_type: newChan.player_type,
+        status: newChan.status,
+        access_permission: newChan.access_permission
+      },
       req.ip || null
     );
 
@@ -179,8 +392,32 @@ router.put('/admin/channels/:id', async (req: AuthenticatedRequest, res: Respons
     const { id } = req.params;
     const updates = { ...req.body };
 
+    // Handle Player Type and iframe validation
+    if (updates.player_type === 'external_iframe') {
+      if (updates.iframe_code !== undefined) {
+        if (!updates.iframe_code || !String(updates.iframe_code).trim()) {
+          res.status(400).json({ error: 'O Código HTML do iframe é obrigatório para canais com Player Externo.' });
+          return;
+        }
+        const allowedDomains = await getActiveIframeDomains();
+        const iframeCheck = validateIframeCode(updates.iframe_code, allowedDomains);
+        if (!iframeCheck.isValid) {
+          res.status(400).json({ error: iframeCheck.error });
+          return;
+        }
+        updates.iframe_url = iframeCheck.iframeUrl!;
+        updates.iframe_code = iframeCheck.sanitizedCode!;
+        if (!updates.stream_url) {
+          updates.stream_url = iframeCheck.iframeUrl!;
+        }
+      }
+    } else if (updates.player_type === 'internal') {
+      updates.iframe_code = null;
+      updates.iframe_url = null;
+    }
+
     // SSRF Security Validation on Primary Stream URL if updated
-    if (updates.stream_url) {
+    if (updates.stream_url && updates.player_type !== 'external_iframe') {
       const mainCheck = validateStreamUrl(updates.stream_url);
       if (!mainCheck.isValid) {
         res.status(400).json({ error: `URL Principal inválida: ${mainCheck.error}` });
@@ -390,6 +627,62 @@ router.get('/admin/sources', async (_req: AuthenticatedRequest, res: Response) =
 // ==========================================
 // 4. ADVERTISING BANNERS
 // ==========================================
+function validateSlotAdScript(code: string, slotDimensions?: string): { valid: boolean; warning?: string; error?: string } {
+  if (!code || !code.trim()) {
+    return { valid: true };
+  }
+  const lower = code.toLowerCase();
+
+  // Block dangerous patterns
+  const dangerousPatterns = [
+    'document.cookie',
+    'window.location.href =',
+    'top.location =',
+    'parent.location =',
+    'onerror=',
+    'onload=',
+    'javascript:'
+  ];
+
+  for (const pat of dangerousPatterns) {
+    if (lower.includes(pat)) {
+      return {
+        valid: false,
+        error: `O script contém padrões inseguros (${pat}). Utilize apenas tags de script ou snippets oficiais da rede de anúncios.`
+      };
+    }
+  }
+
+  // Detect Social Bar format in static slots
+  if (lower.includes('socialbar') || lower.includes('social-bar') || lower.includes('in-page-push')) {
+    return {
+      valid: true,
+      warning: 'Aviso: Formatos "Social Bar / In-Page Push" costumam se ancorar na página inteira e não em contêineres estáticos de banner. Recomendamos utilizar códigos específicos de banners (ex: 728x90, 300x250, 468x60).'
+    };
+  }
+
+  // Check dimensions mismatch
+  if (slotDimensions) {
+    const is300x250Slot = slotDimensions.includes('300x250');
+    const is728x90Slot = slotDimensions.includes('728x90');
+
+    if (is300x250Slot && (lower.includes('728') || lower.includes('leaderboard'))) {
+      return {
+        valid: true,
+        warning: 'Aviso de compatibilidade: Este slot é recomendado para 300x250 (Medium Rectangle), mas o script parece configurar um banner 728x90 (Leaderboard). Verifique o formato na sua rede de anúncios para evitar cortes visuais.'
+      };
+    }
+    if (is728x90Slot && (lower.includes('300x250') || lower.includes('160x600'))) {
+      return {
+        valid: true,
+        warning: 'Aviso de compatibilidade: Este slot é recomendado para 728x90 (Leaderboard horizontal), mas o script parece configurar um formato diferente (300x250 ou arranha-céu).'
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
 router.get('/admin/ads', async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const ads = await getAdSlots();
@@ -402,11 +695,115 @@ router.get('/admin/ads', async (_req: AuthenticatedRequest, res: Response) => {
 router.put('/admin/ads/:id', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const updated = await updateAdSlot(id, req.body);
-    if (!updated) {
-      res.status(404).json({ error: 'Slot não encontrado' });
+    const existingSlots = await getAdSlots();
+    const existing = existingSlots.find(s => s.id === id);
+    if (!existing) {
+      res.status(404).json({ error: 'Slot publicitário não encontrado' });
       return;
     }
+
+    const {
+      is_enabled,
+      title,
+      subtitle,
+      ad_type,
+      image_url,
+      target_url,
+      code_snippet,
+      advertiser_name,
+      alt_text,
+      open_in_new_tab,
+      show_placeholder_when_empty,
+      action
+    } = req.body;
+
+    const updates: Partial<DbAdSlot> = {};
+    let scriptWarning: string | undefined = undefined;
+
+    if (action === 'remove_ad') {
+      updates.ad_type = 'none';
+      updates.image_url = null;
+      updates.code_snippet = null;
+      updates.target_url = '';
+      updates.advertiser_name = null;
+      updates.alt_text = null;
+    } else {
+      if (ad_type !== undefined) {
+        if (!['none', 'image_upload', 'image_url', 'code_script'].includes(ad_type)) {
+          res.status(400).json({ error: 'Tipo de anúncio inválido.' });
+          return;
+        }
+        updates.ad_type = ad_type;
+      }
+
+      if (ad_type === 'image_url' || (existing.ad_type === 'image_url' && ad_type === undefined)) {
+        if (image_url) {
+          const trimmedImg = String(image_url).trim();
+          if (!trimmedImg.startsWith('https://') && !trimmedImg.startsWith('/uploads/')) {
+            res.status(400).json({ error: 'A URL da imagem deve utilizar protocolo seguro HTTPS (ex: https://dominio.com/banner.png).' });
+            return;
+          }
+          updates.image_url = trimmedImg;
+        } else if (image_url === '' || image_url === null) {
+          updates.image_url = null;
+        }
+      } else if (image_url !== undefined) {
+        updates.image_url = image_url ? String(image_url).trim() : null;
+      }
+
+      if (ad_type === 'code_script' || (existing.ad_type === 'code_script' && ad_type === undefined)) {
+        if (code_snippet) {
+          const val = validateSlotAdScript(code_snippet, existing.dimensions);
+          if (!val.valid) {
+            res.status(400).json({ error: val.error });
+            return;
+          }
+          scriptWarning = val.warning;
+          updates.code_snippet = String(code_snippet).trim();
+        } else if (code_snippet === '' || code_snippet === null) {
+          updates.code_snippet = null;
+        }
+      } else if (code_snippet !== undefined) {
+        updates.code_snippet = code_snippet ? String(code_snippet).trim() : null;
+      }
+
+      if (target_url !== undefined) {
+        const trimmedTarget = String(target_url).trim();
+        if (trimmedTarget && trimmedTarget !== '#' && !trimmedTarget.startsWith('http://') && !trimmedTarget.startsWith('https://')) {
+          res.status(400).json({ error: 'A URL de destino deve começar com http:// ou https://' });
+          return;
+        }
+        updates.target_url = trimmedTarget;
+      }
+
+      if (advertiser_name !== undefined) {
+        updates.advertiser_name = advertiser_name ? String(advertiser_name).trim() : null;
+      }
+
+      if (alt_text !== undefined) {
+        updates.alt_text = alt_text ? String(alt_text).trim() : null;
+      }
+
+      if (open_in_new_tab !== undefined) {
+        updates.open_in_new_tab = Boolean(open_in_new_tab);
+      }
+
+      if (show_placeholder_when_empty !== undefined) {
+        updates.show_placeholder_when_empty = Boolean(show_placeholder_when_empty);
+      }
+    }
+
+    if (is_enabled !== undefined) {
+      updates.is_enabled = Boolean(is_enabled);
+    }
+    if (title !== undefined) {
+      updates.title = String(title).trim();
+    }
+    if (subtitle !== undefined) {
+      updates.subtitle = String(subtitle).trim();
+    }
+
+    const updated = await updateAdSlot(id, updates);
 
     await createAuditLog(
       req.admin!.id,
@@ -414,11 +811,14 @@ router.put('/admin/ads/:id', async (req: AuthenticatedRequest, res: Response) =>
       'UPDATE_AD_SLOT',
       'ad_slots',
       id,
-      { is_enabled: updated.is_enabled, title: updated.title },
+      { is_enabled: updated?.is_enabled, ad_type: updated?.ad_type, title: updated?.title, action },
       req.ip || null
     );
 
-    res.json(updated);
+    res.json({
+      ...updated,
+      warning: scriptWarning
+    });
   } catch (err: any) {
     res.status(500).json({ error: 'Erro ao atualizar slot de anúncio' });
   }
@@ -1118,12 +1518,15 @@ router.get('/admin/settings', async (_req: AuthenticatedRequest, res: Response) 
 
 router.put('/admin/settings', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { current_mode, allow_public_browse, max_simultaneous_streams, stream_relay_enabled } = req.body;
+    const { current_mode, allow_public_browse, max_simultaneous_streams, stream_relay_enabled, default_home_tab, defaultHomeTab } = req.body;
     const updates: Partial<DbAccessModes> = {};
     if (current_mode) updates.current_mode = current_mode;
     if (allow_public_browse !== undefined) updates.allow_public_browse = Boolean(allow_public_browse);
     if (max_simultaneous_streams !== undefined) updates.max_simultaneous_streams = parseInt(max_simultaneous_streams, 10) || 2;
     if (stream_relay_enabled !== undefined) updates.stream_relay_enabled = Boolean(stream_relay_enabled);
+    if (default_home_tab !== undefined || defaultHomeTab !== undefined) {
+      updates.default_home_tab = default_home_tab || defaultHomeTab;
+    }
 
     const updated = await updateAccessModes(updates);
 
@@ -1671,5 +2074,527 @@ router.delete('/admin/preroll/:id', async (req: AuthenticatedRequest, res: Respo
   }
 });
 
+// ==========================================
+// 21. BANNER IN-PLAY NO PLAYER DE VÍDEO
+// ==========================================
+
+function validateAdScriptCode(code: string): { valid: boolean; warning?: string; error?: string } {
+  if (!code || !code.trim()) {
+    return { valid: true };
+  }
+  const lower = code.toLowerCase();
+
+  // Block dangerous patterns
+  const dangerousPatterns = [
+    'document.cookie',
+    'window.location.href =',
+    'top.location =',
+    'parent.location =',
+    'onerror=',
+    'onload=',
+    'javascript:'
+  ];
+
+  for (const pat of dangerousPatterns) {
+    if (lower.includes(pat)) {
+      return {
+        valid: false,
+        error: `O script contém padrões inseguros (${pat}). Utilize apenas tags de script ou snippets oficiais da rede de anúncios.`
+      };
+    }
+  }
+
+  // Detect Social Bar format
+  if (lower.includes('socialbar') || lower.includes('social-bar') || lower.includes('in-page-push')) {
+    return {
+      valid: true,
+      warning: 'Aviso: Formatos "Social Bar / In-Page Push" costumam se ancorar na página inteira e não em contêineres sobre o vídeo. Para banners sobre o player (In-Play), recomenda-se o formato de Banner (468x60 / 300x50 / 728x90) ou a opção "Banner Personalizado com Imagem e Link".'
+    };
+  }
+
+  return { valid: true };
+}
+
+router.get('/admin/inplay', async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const settings = await getInPlaySettings();
+    res.json(settings);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao carregar configurações do Banner In-Play' });
+  }
+});
+
+router.put('/admin/inplay', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const {
+      is_enabled,
+      ad_format,
+      ad_script_code,
+      banner_image_url,
+      banner_target_url,
+      banner_title,
+      position,
+      delay_seconds,
+      interval_minutes,
+      duration_seconds,
+      fade_out_seconds,
+      close_button_enabled,
+      target_type,
+      target_channel_ids,
+      target_category_ids,
+      exempt_plan_ids
+    } = req.body;
+
+    // 1. Validation
+    if (delay_seconds !== undefined && Number(delay_seconds) < 3) {
+      res.status(400).json({ error: 'O Delay inicial (Início do Banner) deve ser de no mínimo 3 segundos.' });
+      return;
+    }
+
+    if (duration_seconds !== undefined && Number(duration_seconds) < 5) {
+      res.status(400).json({ error: 'A Duração em Tela deve ser de no mínimo 5 segundos.' });
+      return;
+    }
+
+    if (interval_minutes !== undefined && Number(interval_minutes) < 0) {
+      res.status(400).json({ error: 'O Intervalo Periódico deve ser igual ou superior a 0 minutos.' });
+      return;
+    }
+
+    if (fade_out_seconds !== undefined && (Number(fade_out_seconds) < 0.2 || Number(fade_out_seconds) > 5.0)) {
+      res.status(400).json({ error: 'A duração do Fade-Out deve estar entre 0.2 e 5.0 segundos.' });
+      return;
+    }
+
+    // 2. Validate script code
+    let scriptWarning: string | undefined = undefined;
+    if (ad_script_code) {
+      const scriptValidation = validateAdScriptCode(ad_script_code);
+      if (!scriptValidation.valid) {
+        res.status(400).json({ error: scriptValidation.error });
+        return;
+      }
+      scriptWarning = scriptValidation.warning;
+    }
+
+    const updated = await updateInPlaySettings({
+      is_enabled,
+      ad_format,
+      ad_script_code,
+      banner_image_url,
+      banner_target_url,
+      banner_title,
+      position,
+      delay_seconds: delay_seconds !== undefined ? Number(delay_seconds) : undefined,
+      interval_minutes: interval_minutes !== undefined ? Number(interval_minutes) : undefined,
+      duration_seconds: duration_seconds !== undefined ? Number(duration_seconds) : undefined,
+      fade_out_seconds: fade_out_seconds !== undefined ? Number(fade_out_seconds) : undefined,
+      close_button_enabled,
+      target_type,
+      target_channel_ids,
+      target_category_ids,
+      exempt_plan_ids
+    });
+
+    await createAuditLog(
+      req.admin!.id,
+      req.admin!.email,
+      'UPDATE_INPLAY_SETTINGS',
+      'inplay_settings',
+      'primary',
+      { is_enabled: updated.is_enabled, ad_format: updated.ad_format, target_type: updated.target_type },
+      req.ip || null
+    );
+
+    res.json({
+      ...updated,
+      warning: scriptWarning
+    });
+  } catch (err: any) {
+    console.error('[Update InPlay Settings Error]', err);
+    res.status(500).json({ error: 'Erro ao salvar configurações do Banner In-Play' });
+  }
+});
+
+// ==========================================
+// 14. FOOTBALL AGENDA & LIVE SPORTS (AGENDA DE FUTEBOL)
+// ==========================================
+
+// Matches List
+router.get('/admin/football/matches', async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const matches = await getFootballMatches(true);
+    res.json(matches);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao listar partidas de futebol' });
+  }
+});
+
+// Single Match
+router.get('/admin/football/matches/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const match = await getFootballMatchById(req.params.id);
+    if (!match) return res.status(404).json({ error: 'Partida não encontrada' });
+    res.json(match);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao obter dados da partida' });
+  }
+});
+
+// Create Match
+router.post('/admin/football/matches', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const {
+      competition,
+      competition_country,
+      competitionCountry,
+      round,
+      home_team_id,
+      homeTeamId,
+      home_team_name,
+      homeTeamName,
+      home_team_logo,
+      homeTeamLogo,
+      away_team_id,
+      awayTeamId,
+      away_team_name,
+      awayTeamName,
+      away_team_logo,
+      awayTeamLogo,
+      match_date,
+      matchDate,
+      match_time,
+      matchTime,
+      timezone,
+      description,
+      channels,
+      primary_channel_id,
+      primaryChannelId,
+      status,
+      score_home,
+      scoreHome,
+      score_away,
+      scoreAway,
+      minute,
+      is_active,
+      isActive,
+      is_featured,
+      isFeatured,
+      display_order,
+      displayOrder
+    } = req.body;
+
+    const finalHomeName = home_team_name || homeTeamName;
+    const finalAwayName = away_team_name || awayTeamName;
+    const finalCompetition = competition?.trim();
+    const finalDate = match_date || matchDate;
+    const finalTime = match_time || matchTime;
+
+    if (!finalHomeName || !finalAwayName || !finalCompetition || !finalDate || !finalTime) {
+      return res.status(400).json({
+        error: 'Preencha os campos obrigatórios: Campeonato, Times Mandante/Visitante, Data e Horário.'
+      });
+    }
+
+    // Process channels array
+    const rawChannels = channels || [];
+    const formattedChannels = rawChannels.map((c: any) => ({
+      channel_id: c.channel_id || c.channelId,
+      channel_name: c.channel_name || c.channelName,
+      channel_number: c.channel_number !== undefined ? c.channel_number : c.channelNumber,
+      is_primary: Boolean(c.is_primary ?? c.isPrimary)
+    }));
+
+    const finalPrimaryChannel = primary_channel_id || primaryChannelId || (formattedChannels[0]?.channel_id) || null;
+
+    const created = await createFootballMatch({
+      competition: finalCompetition,
+      competition_country: competition_country || competitionCountry || 'Brasil',
+      round: round?.trim() || null,
+      home_team_id: home_team_id || homeTeamId || null,
+      home_team_name: finalHomeName.trim(),
+      home_team_logo: home_team_logo || homeTeamLogo || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=120&h=120&q=80',
+      away_team_id: away_team_id || awayTeamId || null,
+      away_team_name: finalAwayName.trim(),
+      away_team_logo: away_team_logo || awayTeamLogo || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=120&h=120&q=80',
+      match_date: finalDate,
+      match_time: finalTime,
+      timezone: timezone || 'America/Sao_Paulo',
+      description: description?.trim() || null,
+      channels: formattedChannels,
+      primary_channel_id: finalPrimaryChannel,
+      status: status || 'scheduled',
+      score_home: score_home !== undefined && score_home !== null ? Number(score_home) : (scoreHome !== undefined && scoreHome !== null ? Number(scoreHome) : null),
+      score_away: score_away !== undefined && score_away !== null ? Number(score_away) : (scoreAway !== undefined && scoreAway !== null ? Number(scoreAway) : null),
+      minute: minute?.trim() || null,
+      is_active: is_active !== undefined ? Boolean(is_active) : (isActive !== undefined ? Boolean(isActive) : true),
+      is_featured: is_featured !== undefined ? Boolean(is_featured) : (isFeatured !== undefined ? Boolean(isFeatured) : false),
+      display_order: display_order !== undefined ? Number(display_order) : (displayOrder !== undefined ? Number(displayOrder) : 1)
+    });
+
+    await createAuditLog(
+      req.admin!.id,
+      req.admin!.email,
+      'CREATE_FOOTBALL_MATCH',
+      'football_match',
+      created.id,
+      { home: created.home_team_name, away: created.away_team_name, competition: created.competition },
+      req.ip || null
+    );
+
+    res.status(201).json(created);
+  } catch (err: any) {
+    console.error('[Create Football Match Error]', err);
+    res.status(500).json({ error: 'Erro ao cadastrar partida' });
+  }
+});
+
+// Update Match
+router.put('/admin/football/matches/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const body = req.body;
+
+    const updates: any = {};
+    if (body.competition !== undefined) updates.competition = body.competition.trim();
+    if (body.competition_country !== undefined || body.competitionCountry !== undefined) {
+      updates.competition_country = body.competition_country || body.competitionCountry;
+    }
+    if (body.round !== undefined) updates.round = body.round?.trim() || null;
+    if (body.home_team_id !== undefined || body.homeTeamId !== undefined) updates.home_team_id = body.home_team_id || body.homeTeamId;
+    if (body.home_team_name !== undefined || body.homeTeamName !== undefined) updates.home_team_name = (body.home_team_name || body.homeTeamName).trim();
+    if (body.home_team_logo !== undefined || body.homeTeamLogo !== undefined) updates.home_team_logo = body.home_team_logo || body.homeTeamLogo;
+    if (body.away_team_id !== undefined || body.awayTeamId !== undefined) updates.away_team_id = body.away_team_id || body.awayTeamId;
+    if (body.away_team_name !== undefined || body.awayTeamName !== undefined) updates.away_team_name = (body.away_team_name || body.awayTeamName).trim();
+    if (body.away_team_logo !== undefined || body.awayTeamLogo !== undefined) updates.away_team_logo = body.away_team_logo || body.awayTeamLogo;
+    if (body.match_date !== undefined || body.matchDate !== undefined) updates.match_date = body.match_date || body.matchDate;
+    if (body.match_time !== undefined || body.matchTime !== undefined) updates.match_time = body.match_time || body.matchTime;
+    if (body.timezone !== undefined) updates.timezone = body.timezone;
+    if (body.description !== undefined) updates.description = body.description?.trim() || null;
+    if (body.channels !== undefined) {
+      updates.channels = body.channels.map((c: any) => ({
+        channel_id: c.channel_id || c.channelId,
+        channel_name: c.channel_name || c.channelName,
+        channel_number: c.channel_number !== undefined ? c.channel_number : c.channelNumber,
+        is_primary: Boolean(c.is_primary ?? c.isPrimary)
+      }));
+    }
+    if (body.primary_channel_id !== undefined || body.primaryChannelId !== undefined) {
+      updates.primary_channel_id = body.primary_channel_id || body.primaryChannelId;
+    }
+    if (body.status !== undefined) updates.status = body.status;
+    if (body.score_home !== undefined || body.scoreHome !== undefined) {
+      const v = body.score_home !== undefined ? body.score_home : body.scoreHome;
+      updates.score_home = v !== null && v !== '' ? Number(v) : null;
+    }
+    if (body.score_away !== undefined || body.scoreAway !== undefined) {
+      const v = body.score_away !== undefined ? body.score_away : body.scoreAway;
+      updates.score_away = v !== null && v !== '' ? Number(v) : null;
+    }
+    if (body.minute !== undefined) updates.minute = body.minute?.trim() || null;
+    if (body.is_active !== undefined || body.isActive !== undefined) {
+      updates.is_active = Boolean(body.is_active ?? body.isActive);
+    }
+    if (body.is_featured !== undefined || body.isFeatured !== undefined) {
+      updates.is_featured = Boolean(body.is_featured ?? body.isFeatured);
+    }
+    if (body.display_order !== undefined || body.displayOrder !== undefined) {
+      updates.display_order = Number(body.display_order ?? body.displayOrder);
+    }
+
+    const updated = await updateFootballMatch(id, updates);
+    if (!updated) return res.status(404).json({ error: 'Partida não encontrada para atualização' });
+
+    await createAuditLog(
+      req.admin!.id,
+      req.admin!.email,
+      'UPDATE_FOOTBALL_MATCH',
+      'football_match',
+      id,
+      updates,
+      req.ip || null
+    );
+
+    res.json(updated);
+  } catch (err: any) {
+    console.error('[Update Football Match Error]', err);
+    res.status(500).json({ error: 'Erro ao atualizar partida' });
+  }
+});
+
+// Delete Match
+router.delete('/admin/football/matches/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const ok = await deleteFootballMatch(id);
+    if (!ok) return res.status(404).json({ error: 'Partida não encontrada para exclusão' });
+
+    await createAuditLog(
+      req.admin!.id,
+      req.admin!.email,
+      'DELETE_FOOTBALL_MATCH',
+      'football_match',
+      id,
+      null,
+      req.ip || null
+    );
+
+    res.json({ success: true, message: 'Partida excluída com sucesso' });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao excluir partida' });
+  }
+});
+
+// Duplicate Match
+router.post('/admin/football/matches/:id/duplicate', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const duplicated = await duplicateFootballMatch(id);
+    if (!duplicated) return res.status(404).json({ error: 'Partida original não encontrada' });
+
+    await createAuditLog(
+      req.admin!.id,
+      req.admin!.email,
+      'DUPLICATE_FOOTBALL_MATCH',
+      'football_match',
+      duplicated.id,
+      { originalId: id },
+      req.ip || null
+    );
+
+    res.status(201).json(duplicated);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao duplicar cadastro de partida' });
+  }
+});
+
+// Toggle Match Active
+router.patch('/admin/football/matches/:id/toggle', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const updated = await toggleFootballMatchActive(id);
+    if (!updated) return res.status(404).json({ error: 'Partida não encontrada' });
+
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao alterar visibilidade da partida' });
+  }
+});
+
+// Teams Management Endpoints
+router.get('/admin/football/teams', async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const teams = await getFootballTeams();
+    res.json(teams);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao listar equipes' });
+  }
+});
+
+router.post('/admin/football/teams', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { name, short_name, shortName, logo_url, logoUrl, country } = req.body;
+    if (!name || !(logo_url || logoUrl)) {
+      return res.status(400).json({ error: 'Nome e Escudo/Logo são obrigatórios para a equipe' });
+    }
+
+    const created = await createFootballTeam({
+      name: name.trim(),
+      short_name: (short_name || shortName)?.trim() || null,
+      logo_url: (logo_url || logoUrl).trim(),
+      country: country?.trim() || 'Brasil'
+    });
+
+    await createAuditLog(
+      req.admin!.id,
+      req.admin!.email,
+      'CREATE_FOOTBALL_TEAM',
+      'football_team',
+      created.id,
+      { name: created.name },
+      req.ip || null
+    );
+
+    res.status(201).json(created);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao cadastrar equipe' });
+  }
+});
+
+router.put('/admin/football/teams/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, short_name, shortName, logo_url, logoUrl, country } = req.body;
+
+    const updates: any = {};
+    if (name !== undefined) updates.name = name.trim();
+    if (short_name !== undefined || shortName !== undefined) updates.short_name = (short_name || shortName)?.trim() || null;
+    if (logo_url !== undefined || logoUrl !== undefined) updates.logo_url = (logo_url || logoUrl).trim();
+    if (country !== undefined) updates.country = country?.trim() || 'Brasil';
+
+    const updated = await updateFootballTeam(id, updates);
+    if (!updated) return res.status(404).json({ error: 'Equipe não encontrada' });
+
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao atualizar equipe' });
+  }
+});
+
+router.delete('/admin/football/teams/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const ok = await deleteFootballTeam(id);
+    if (!ok) return res.status(404).json({ error: 'Equipe não encontrada para exclusão' });
+
+    res.json({ success: true, message: 'Equipe excluída com sucesso' });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao excluir equipe' });
+  }
+});
+
+// Agenda Settings
+router.get('/admin/football/settings', async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const settings = await getFootballAgendaSettings();
+    res.json(settings);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao obter configurações da agenda' });
+  }
+});
+
+router.put('/admin/football/settings', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { is_enabled, isEnabled, days_to_display, daysToDisplay, hide_finished_after_hours, hideFinishedAfterHours, default_view_mode, defaultViewMode } = req.body;
+
+    const updates: any = {};
+    if (is_enabled !== undefined || isEnabled !== undefined) updates.is_enabled = Boolean(is_enabled ?? isEnabled);
+    if (days_to_display !== undefined || daysToDisplay !== undefined) updates.days_to_display = Number(days_to_display ?? daysToDisplay);
+    if (hide_finished_after_hours !== undefined || hideFinishedAfterHours !== undefined) {
+      updates.hide_finished_after_hours = Number(hide_finished_after_hours ?? hideFinishedAfterHours);
+    }
+    if (default_view_mode !== undefined || defaultViewMode !== undefined) {
+      updates.default_view_mode = default_view_mode || defaultViewMode;
+    }
+
+    const updated = await updateFootballAgendaSettings(updates);
+
+    await createAuditLog(
+      req.admin!.id,
+      req.admin!.email,
+      'UPDATE_FOOTBALL_SETTINGS',
+      'football_agenda_settings',
+      'primary',
+      updates,
+      req.ip || null
+    );
+
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao salvar configurações da agenda' });
+  }
+});
+
 export default router;
+
 

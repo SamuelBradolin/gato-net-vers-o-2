@@ -141,3 +141,243 @@ export function validateStreamUrl(urlStr: string): StreamUrlValidationResult {
     normalizedUrl: trimmed
   };
 }
+
+export const DEFAULT_ALLOWED_IFRAME_DOMAINS = [
+  'youtube.com',
+  'www.youtube.com',
+  'youtu.be',
+  'vimeo.com',
+  'player.vimeo.com',
+  'dailymotion.com',
+  'www.dailymotion.com',
+  'twitch.tv',
+  'player.twitch.tv',
+  'facebook.com',
+  'www.facebook.com',
+  'stream.cloudflare.com',
+  'cloudflarestream.com',
+  'mediadelivery.net',
+  'iframe.mediadelivery.net',
+  'rumble.com',
+  'kick.com',
+  'player.kick.com',
+  'wistia.com',
+  'fast.wistia.net',
+  'streamyard.com'
+];
+
+export interface IframeCodeValidationResult {
+  isValid: boolean;
+  error?: string;
+  iframeUrl?: string;
+  sanitizedCode?: string;
+  hostname?: string;
+}
+
+/**
+ * Validates external iframe embed code or URL, ensuring strict HTTPS, no scripts/HTML injection,
+ * and checking against authorized streaming domains.
+ */
+export function validateIframeCode(
+  rawInput: string,
+  customAllowedDomains: string[] = []
+): IframeCodeValidationResult {
+  if (!rawInput || typeof rawInput !== 'string') {
+    return { isValid: false, error: 'Código HTML do iframe não informado.' };
+  }
+
+  const trimmed = rawInput.trim();
+  if (!trimmed) {
+    return { isValid: false, error: 'O código do iframe não pode estar vazio.' };
+  }
+
+  if (trimmed.length > 4096) {
+    return { isValid: false, error: 'O código do iframe excede o limite máximo permitido de 4096 caracteres.' };
+  }
+
+  // 1. Strict Security Filter: Block script tags, object, embed, event handlers, javascript:, data: URIs
+  const dangerousPatterns = [
+    /<script\b/i,
+    /<\/script>/i,
+    /<object\b/i,
+    /<embed\b/i,
+    /<applet\b/i,
+    /<meta\b/i,
+    /<link\b/i,
+    /<svg\b/i,
+    /<img\b/i,
+    /<form\b/i,
+    /javascript:/i,
+    /data:text\/html/i,
+    /vbscript:/i,
+    /\son\w+\s*=/i
+  ];
+
+  for (const pattern of dangerousPatterns) {
+    if (pattern.test(trimmed)) {
+      return {
+        isValid: false,
+        error: 'Segurança Estrita: Scripts arbitrários, manipuladores de eventos (onload/onerror) e tags ativas não são permitidos. Insira exclusivamente uma tag <iframe> segura ou a URL HTTPS.'
+      };
+    }
+  }
+
+  // 2. Extract URL: Either from src="..." in an iframe tag OR directly if user pasted an HTTPS URL
+  let extractedUrl: string | null = null;
+
+  if (trimmed.startsWith('https://')) {
+    extractedUrl = trimmed.split(/\s+/)[0];
+  } else {
+    if (!/<iframe\b/i.test(trimmed)) {
+      return {
+        isValid: false,
+        error: 'O código informado não contém um elemento <iframe> válido nem uma URL direta HTTPS.'
+      };
+    }
+
+    const srcMatch = trimmed.match(/src\s*=\s*["']([^"']+)["']/i);
+    if (!srcMatch || !srcMatch[1]) {
+      return {
+        isValid: false,
+        error: 'Atributo "src" obrigatório não encontrado dentro da tag <iframe>.'
+      };
+    }
+    extractedUrl = srcMatch[1].trim();
+  }
+
+  // 3. Validate HTTPS protocol
+  if (!extractedUrl.startsWith('https://')) {
+    return {
+      isValid: false,
+      error: 'O endereço do player externo deve utilizar estritamente o protocolo seguro HTTPS (https://).'
+    };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(extractedUrl);
+  } catch {
+    return {
+      isValid: false,
+      error: 'O endereço informado no atributo src do iframe não é uma URL válida.'
+    };
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // 4. Anti-SSRF check for internal/loopback IPs
+  if (BLOCKED_HOSTNAMES.has(hostname) || isPrivateIPv4(hostname) || isPrivateIPv6(hostname)) {
+    return {
+      isValid: false,
+      error: 'Segurança Anti-SSRF: Não é permitido incorporar iframes de endereços locais, loopback ou metadados de nuvem.'
+    };
+  }
+
+  // 5. Allowed Domains validation (Exact hostname matching - subdomains not implicitly granted)
+  const allAllowedDomains = Array.from(
+    new Set([
+      ...DEFAULT_ALLOWED_IFRAME_DOMAINS.map(d => d.toLowerCase().trim()),
+      ...customAllowedDomains.map(d => d.toLowerCase().trim())
+    ])
+  ).filter(Boolean);
+
+  const isDomainAllowed = allAllowedDomains.some(allowed => {
+    return hostname === allowed;
+  });
+
+  if (!isDomainAllowed) {
+    return {
+      isValid: false,
+      error: `O domínio "${hostname}" não consta na lista de provedores de iframe autorizados pela administração. Adicione o domínio nas configurações ou utilize um provedor suportado.`,
+      hostname
+    };
+  }
+
+  // 6. Build canonical sanitized iframe code
+  const sanitizedCode = `<iframe src="${extractedUrl}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen" allowfullscreen="true" frameborder="0" width="100%" height="100%"></iframe>`;
+
+  return {
+    isValid: true,
+    iframeUrl: extractedUrl,
+    sanitizedCode,
+    hostname
+  };
+}
+
+export interface DomainValidationResult {
+  isValid: boolean;
+  normalized?: string;
+  error?: string;
+}
+
+/**
+ * Validates a domain for authorization in the external iframe whitelist.
+ * Enforces strict RFC 1123 hostname syntax, blocks wildcards, protocols, scripts, and private IPs.
+ */
+export function validateDomainInput(rawDomain: string): DomainValidationResult {
+  if (!rawDomain || typeof rawDomain !== 'string') {
+    return { isValid: false, error: 'O domínio deve ser informado.' };
+  }
+
+  let clean = rawDomain.trim().toLowerCase();
+
+  // Strip leading protocols if inadvertently pasted
+  if (clean.startsWith('http://') || clean.startsWith('https://')) {
+    clean = clean.replace(/^https?:\/\//, '');
+  }
+
+  // Strip trailing slashes, paths, query parameters or fragments
+  clean = clean.split(/[/?#]/)[0].trim();
+
+  // Strip port if present
+  if (clean.includes(':')) {
+    clean = clean.split(':')[0].trim();
+  }
+
+  if (!clean) {
+    return { isValid: false, error: 'Domínio inválido ou em branco.' };
+  }
+
+  if (clean.length > 253) {
+    return { isValid: false, error: 'O domínio excede o limite máximo de 253 caracteres.' };
+  }
+
+  // Prohibit wildcards and dangerous characters
+  if (clean.includes('*') || clean.includes('%') || clean.includes('?') || clean.includes('<') || clean.includes('>')) {
+    return { isValid: false, error: 'Curingas (*) ou caracteres especiais não são permitidos. Digite o hostname exato.' };
+  }
+
+  // Prohibit dangerous protocols
+  if (clean.includes('javascript') || clean.includes('data:') || clean.includes('vbscript')) {
+    return { isValid: false, error: 'Protocolos de script ou dados não são domínios válidos.' };
+  }
+
+  // Validate hostname format: must contain at least one dot, valid labels
+  // Each label 1-63 chars, alphanumeric with hyphens, not starting or ending with hyphen
+  const domainRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/i;
+  if (!domainRegex.test(clean)) {
+    return { isValid: false, error: 'Formato de domínio inválido. Exemplo válido: sinalpublicoetv.vercel.app ou player.meuservidor.com' };
+  }
+
+  // Prohibit local / internal extensions
+  if (
+    clean.endsWith('.internal') ||
+    clean.endsWith('.local') ||
+    clean.endsWith('.localhost') ||
+    clean.endsWith('.corp') ||
+    clean.endsWith('.lan') ||
+    clean.endsWith('.onion')
+  ) {
+    return { isValid: false, error: 'Domínios locais ou internos não são autorizados por razões de segurança.' };
+  }
+
+  // Prohibit blocked / private hostnames and IPs
+  if (BLOCKED_HOSTNAMES.has(clean) || isPrivateIPv4(clean) || isPrivateIPv6(clean)) {
+    return { isValid: false, error: 'Endereços de rede privada, loopback ou metadados de nuvem são estritamente bloqueados.' };
+  }
+
+  return {
+    isValid: true,
+    normalized: clean
+  };
+}

@@ -1,14 +1,15 @@
 import { Category, Channel, SubscriptionPlan, AdSlot, SystemSettings, PaymentSettings, UserSubscriber } from '../types';
 
 export const INITIAL_CATEGORIES: Category[] = [
-  { id: 'cat_all', name: 'Todos os Canais', slug: 'todos', order: 0, iconName: 'Layers' },
-  { id: 'cat_aberta', name: 'TV Aberta', slug: 'tv-aberta', order: 1, iconName: 'Tv' },
-  { id: 'cat_esportes', name: 'Esportes', slug: 'esportes', order: 2, iconName: 'Trophy' },
-  { id: 'cat_filmes', name: 'Filmes e Séries', slug: 'filmes-series', order: 3, iconName: 'Film' },
-  { id: 'cat_noticias', name: 'Notícias', slug: 'noticias', order: 4, iconName: 'Newspaper' },
-  { id: 'cat_infantil', name: 'Infantil', slug: 'infantil', order: 5, iconName: 'Smile' },
-  { id: 'cat_documentarios', name: 'Documentários', slug: 'documentarios', order: 6, iconName: 'Compass' },
-  { id: 'cat_variedades', name: 'Variedades', slug: 'variedades', order: 7, iconName: 'Sparkles' },
+  { id: 'cat_football', name: 'Futebol Ao Vivo', slug: 'futebol-ao-vivo', order: 0, iconName: 'Trophy' },
+  { id: 'cat_all', name: 'Todos os Canais', slug: 'todos', order: 1, iconName: 'Layers' },
+  { id: 'cat_aberta', name: 'TV Aberta', slug: 'tv-aberta', order: 2, iconName: 'Tv' },
+  { id: 'cat_esportes', name: 'Esportes', slug: 'esportes', order: 3, iconName: 'Activity' },
+  { id: 'cat_filmes', name: 'Filmes e Séries', slug: 'filmes-series', order: 4, iconName: 'Film' },
+  { id: 'cat_noticias', name: 'Notícias', slug: 'noticias', order: 5, iconName: 'Newspaper' },
+  { id: 'cat_infantil', name: 'Infantil', slug: 'infantil', order: 6, iconName: 'Smile' },
+  { id: 'cat_documentarios', name: 'Documentários', slug: 'documentarios', order: 7, iconName: 'Compass' },
+  { id: 'cat_variedades', name: 'Variedades', slug: 'variedades', order: 8, iconName: 'Sparkles' },
 ];
 
 export const INITIAL_CHANNELS: Channel[] = [
@@ -463,52 +464,77 @@ export const INITIAL_AD_SLOTS: AdSlot[] = [
   {
     id: 'ad_header',
     slotType: 'header',
-    title: 'Espaço Publicitário Reservado',
+    title: 'Espaço Publicitário - Topo',
     subtitle: 'Área reservada para veiculação de parceiros institucionais',
-    targetUrl: '#',
+    targetUrl: '',
     isEnabled: false,
     dimensions: '728x90 px (Leaderboard)',
-    codeSnippet: '<!-- Espaço reservado para banner 728x90 -->'
+    codeSnippet: '',
+    adType: 'none',
+    advertiserName: '',
+    altText: '',
+    openInNewTab: true,
+    showPlaceholderWhenEmpty: false
   },
   {
     id: 'ad_player_side',
     slotType: 'player_side',
-    title: 'Espaço Publicitário Reservado',
+    title: 'Espaço Publicitário - Lateral do Player',
     subtitle: 'Área reservada para parceiros e anunciantes da Gato Net.',
-    targetUrl: '#',
+    targetUrl: '',
     isEnabled: true,
     dimensions: '300x250 px (Medium Rectangle)',
-    codeSnippet: '<!-- Banner reservado lateral do player -->'
+    codeSnippet: '',
+    adType: 'none',
+    advertiserName: '',
+    altText: '',
+    openInNewTab: true,
+    showPlaceholderWhenEmpty: true
   },
   {
     id: 'ad_player_bottom',
     slotType: 'player_bottom',
-    title: 'Espaço Publicitário Reservado',
+    title: 'Espaço Publicitário - Abaixo do Player',
     subtitle: 'Área reservada para comunicação institucional e anunciantes parceiros.',
-    targetUrl: '#',
+    targetUrl: '',
     isEnabled: true,
     dimensions: '970x90 px / 728x90 px',
-    codeSnippet: '<!-- Banner horizontal abaixo do reprodutor -->'
+    codeSnippet: '',
+    adType: 'none',
+    advertiserName: '',
+    altText: '',
+    openInNewTab: true,
+    showPlaceholderWhenEmpty: true
   },
   {
     id: 'ad_inter_categories',
     slotType: 'inter_categories',
-    title: 'Espaço Publicitário Reservado',
+    title: 'Espaço Publicitário - Entre Categorias',
     subtitle: 'Área reservada entre seções de categorias',
-    targetUrl: '#',
+    targetUrl: '',
     isEnabled: false,
     dimensions: '100% largura x 120 px',
-    codeSnippet: '<!-- Banner inter-categorias -->'
+    codeSnippet: '',
+    adType: 'none',
+    advertiserName: '',
+    altText: '',
+    openInNewTab: true,
+    showPlaceholderWhenEmpty: false
   },
   {
     id: 'ad_footer',
     slotType: 'footer',
-    title: 'Espaço Publicitário Reservado',
+    title: 'Espaço Publicitário - Rodapé',
     subtitle: 'Área reservada no rodapé da plataforma',
-    targetUrl: '#',
+    targetUrl: '',
     isEnabled: true,
     dimensions: '728x90 px ou Responsivo',
-    codeSnippet: '<!-- Banner final de rodapé -->'
+    codeSnippet: '',
+    adType: 'none',
+    advertiserName: '',
+    altText: '',
+    openInNewTab: true,
+    showPlaceholderWhenEmpty: true
   }
 ];
 
@@ -546,7 +572,8 @@ export const INITIAL_SYSTEM_SETTINGS: SystemSettings = {
     bandwidth: '200 Mbps Dedicados Virtarix',
     database: 'PostgreSQL 16 (Local na VPS)'
   },
-  streamRelayEnabled: false
+  streamRelayEnabled: false,
+  defaultHomeTab: 'cat_football'
 };
 
 export const INITIAL_DEMO_SUBSCRIBERS: UserSubscriber[] = [

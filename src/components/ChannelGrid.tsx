@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Channel, Category } from '../types';
+import { Channel, Category, FootballMatch } from '../types';
+import { FootballAgendaSection } from './FootballAgendaSection';
 import {
   Search,
   Star,
@@ -29,6 +30,8 @@ interface ChannelGridProps {
   isAccessModeSubscription: boolean;
   userHasSubscription: boolean;
   focusedIndex?: number;
+  footballMatches?: FootballMatch[];
+  onWatchFootballChannel?: (channelId: string) => void;
 }
 
 // Icon helper for categories
@@ -55,7 +58,9 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
   searchQuery,
   onSearchChange,
   activeCategoryId,
-  onSelectCategory
+  onSelectCategory,
+  footballMatches = [],
+  onWatchFootballChannel
 }) => {
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
 
@@ -89,13 +94,15 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
         <div>
           <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
-            <span>Grade de Canais Demonstrativos</span>
+            <span>Canais e Programação</span>
             <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-blue-950 text-blue-400 border border-blue-500/20">
-              {filteredChannels.length} canais
+              {activeCategoryId === 'cat_football' ? `${footballMatches.length} jogos` : `${filteredChannels.length} canais`}
             </span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Navegue pelas categorias para testar os canais demonstrativos na plataforma.
+            {activeCategoryId === 'cat_football'
+              ? 'Agenda esportiva com partidas ao vivo e transmissões vinculadas aos canais da Gato Net.'
+              : 'Navegue pelas categorias para assistir aos canais demonstrativos na plataforma.'}
           </p>
         </div>
 
@@ -144,7 +151,7 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
 
       {/* Categories Horizontal Scrolling Filter Bar (Tabs / Segmented Control) */}
       <div className="flex items-center gap-2 overflow-x-auto py-4 scrollbar-none">
-        {categories.map((cat) => {
+        {categories.filter((cat, idx, arr) => arr.findIndex(c => c.id === cat.id) === idx).map((cat) => {
           const isActive = activeCategoryId === cat.id;
           return (
             <button
@@ -163,8 +170,15 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
         })}
       </div>
 
-      {/* Channel Cards Grid */}
-      {filteredChannels.length === 0 ? (
+      {/* Category Content: Either Football Agenda or Channel Cards Grid */}
+      {activeCategoryId === 'cat_football' ? (
+        <FootballAgendaSection
+          matches={footballMatches}
+          onWatchChannel={onWatchFootballChannel || (() => {})}
+          onNavigateToChannels={() => onSelectCategory('cat_all')}
+          searchQuery={searchQuery}
+        />
+      ) : filteredChannels.length === 0 ? (
         <div className="w-full py-16 text-center rounded-2xl bg-[#090e1c] border border-slate-800 p-8 my-4">
           <div className="w-12 h-12 mx-auto rounded-full bg-slate-800 flex items-center justify-center text-slate-400 mb-3">
             <Search className="w-6 h-6" />

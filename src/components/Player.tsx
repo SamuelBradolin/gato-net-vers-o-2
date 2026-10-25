@@ -19,7 +19,9 @@ import {
   Megaphone,
   ExternalLink,
   FastForward,
-  Clock
+  Clock,
+  X,
+  Globe
 } from 'lucide-react';
 
 interface PlayerProps {
@@ -77,6 +79,15 @@ export const Player: React.FC<PlayerProps> = ({
   const [canSkipPreroll, setCanSkipPreroll] = useState<boolean>(false);
   const [prerollProgress, setPrerollProgress] = useState<{ currentTime: number; duration: number }>({ currentTime: 0, duration: 0 });
   const [prerollImpressionSent, setPrerollImpressionSent] = useState(false);
+
+  // In-Play Banner Advertising State
+  const [inPlayConfig, setInPlayConfig] = useState<any | null>(null);
+  const [isInPlayVisible, setIsInPlayVisible] = useState(false);
+  const [isInPlayFadingOut, setIsInPlayFadingOut] = useState(false);
+
+  // External Iframe Player State
+  const isExternalIframe = selectedChannel?.playerType === 'external_iframe' && Boolean(selectedChannel?.iframeUrl);
+  const [isIframeLoaded, setIsIframeLoaded] = useState(false);
 
   // Persistent visitor ID for accurate frequency capping and events
   const getVisitorId = useCallback(() => {
@@ -195,7 +206,15 @@ export const Player: React.FC<PlayerProps> = ({
   const startChannelPlaybackDirectly = useCallback(() => {
     setIsPrerollActive(false);
     setCurrentPrerollAd(null);
-    if (videoRef.current && selectedChannel) {
+    if (!selectedChannel) return;
+
+    if (selectedChannel.playerType === 'external_iframe' && selectedChannel.iframeUrl) {
+      setIsLoading(false);
+      setIsPlaying(true);
+      return;
+    }
+
+    if (videoRef.current) {
       videoRef.current.src = selectedChannel.streamUrl;
       videoRef.current.load();
       videoRef.current
@@ -279,9 +298,11 @@ export const Player: React.FC<PlayerProps> = ({
     setIsLoading(true);
     setCurrentStreamIndex(0);
     setPrerollImpressionSent(false);
+    setIsIframeLoaded(false);
 
     // Prepare channel stream in parallel (metadata only, without sound or high bandwidth consumption)
-    if (videoRef.current) {
+    const isExtIframe = selectedChannel.playerType === 'external_iframe' && Boolean(selectedChannel.iframeUrl);
+    if (!isExtIframe && videoRef.current) {
       videoRef.current.preload = 'metadata';
       videoRef.current.src = selectedChannel.streamUrl;
       videoRef.current.load();
@@ -341,6 +362,83 @@ export const Player: React.FC<PlayerProps> = ({
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
+  // In-Play Banner Lifecycle & Timers Effect
+  useEffect(() => {
+    // For internal player: active when isPlaying is true.
+    // For external iframe: active when isIframeLoaded is true (delay timer starts upon iframe onLoad per technical limitations)
+    const isStreamActive = isExternalIframe ? isIframeLoaded : isPlaying;
+
+    // Only active when a channel is actively playing/loaded and access is authorized, without active pre-roll
+    if (!selectedChannel || !isStreamActive || !isAccessAllowed || isPrerollActive) {
+      setIsInPlayVisible(false);
+      setIsInPlayFadingOut(false);
+      return;
+    }
+
+    let isCancelled = false;
+    let delayTimer: any = null;
+    let durationTimer: any = null;
+    let intervalTimer: any = null;
+
+    fetch('/api/public/inplay/eligible', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        channelId: selectedChannel.id,
+        userEmail
+      })
+    })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (isCancelled || !data?.eligible || !data.config) return;
+        const cfg = data.config;
+        setInPlayConfig(cfg);
+
+        const triggerShowBanner = () => {
+          if (isCancelled) return;
+          setIsInPlayFadingOut(false);
+          setIsInPlayVisible(true);
+
+          // Duration on screen
+          durationTimer = setTimeout(() => {
+            if (isCancelled) return;
+            setIsInPlayFadingOut(true);
+            setTimeout(() => {
+              if (isCancelled) return;
+              setIsInPlayVisible(false);
+              setIsInPlayFadingOut(false);
+
+              // Periodic re-appearance if interval > 0
+              if (cfg.intervalMinutes > 0 && !isCancelled) {
+                intervalTimer = setTimeout(triggerShowBanner, cfg.intervalMinutes * 60 * 1000);
+              }
+            }, Math.round((cfg.fadeOutSeconds || 1) * 1000));
+          }, Math.round((cfg.durationSeconds || 25) * 1000));
+        };
+
+        // Initial delay before first appearance
+        delayTimer = setTimeout(triggerShowBanner, Math.max(3, cfg.delaySeconds || 10) * 1000);
+      })
+      .catch(() => {});
+
+    return () => {
+      isCancelled = true;
+      if (delayTimer) clearTimeout(delayTimer);
+      if (durationTimer) clearTimeout(durationTimer);
+      if (intervalTimer) clearTimeout(intervalTimer);
+      setIsInPlayVisible(false);
+      setIsInPlayFadingOut(false);
+    };
+  }, [selectedChannel?.id, isExternalIframe, isIframeLoaded, isPlaying, isAccessAllowed, isPrerollActive, userEmail]);
+
+  const handleCloseInPlay = () => {
+    setIsInPlayFadingOut(true);
+    setTimeout(() => {
+      setIsInPlayVisible(false);
+      setIsInPlayFadingOut(false);
+    }, Math.round((inPlayConfig?.fadeOutSeconds || 1) * 1000));
+  };
+
   const togglePlay = () => {
     if (!videoRef.current) return;
     if (isPlaying) {
@@ -386,7 +484,18 @@ export const Player: React.FC<PlayerProps> = ({
   const handleRetryStream = () => {
     setHasError(false);
     setIsLoading(true);
-    if (!videoRef.current || !selectedChannel) return;
+    if (!selectedChannel) return;
+
+    if (isExternalIframe) {
+      setIsIframeLoaded(false);
+      setTimeout(() => {
+        setIsLoading(false);
+        setIsIframeLoaded(true);
+      }, 350);
+      return;
+    }
+
+    if (!videoRef.current) return;
 
     if (selectedChannel.alternativeStreams && selectedChannel.alternativeStreams.length > 0) {
       const nextIndex = (currentStreamIndex + 1) % (selectedChannel.alternativeStreams.length + 1);
@@ -516,33 +625,62 @@ export const Player: React.FC<PlayerProps> = ({
               aspectRatio169 ? 'aspect-video' : 'aspect-[4/3]'
             }`}
           >
-            {/* HTML5 Video Element (Main Channel Stream) */}
+            {/* Channel Stream: External Iframe or Internal HTML5 Video */}
             {selectedChannel && (
-              <video
-                ref={videoRef}
-                playsInline
-                loop
-                className={`w-full h-full object-cover transition-opacity duration-300 ${
-                  isLoading || hasError || !isAccessAllowed || isPrerollActive
-                    ? 'opacity-0 pointer-events-none'
-                    : 'opacity-100'
-                }`}
-                onWaiting={() => {
-                  if (!isPrerollActive) setIsLoading(true);
-                }}
-                onPlaying={() => {
-                  if (!isPrerollActive) {
-                    setIsLoading(false);
-                    setHasError(false);
-                  }
-                }}
-                onError={() => {
-                  if (!isPrerollActive) {
-                    setIsLoading(false);
-                    setHasError(true);
-                  }
-                }}
-              />
+              isExternalIframe ? (
+                <iframe
+                  key={`ext-iframe-${selectedChannel.id}`}
+                  src={selectedChannel.iframeUrl || undefined}
+                  title={selectedChannel.name}
+                  className={`w-full h-full border-0 transition-opacity duration-300 ${
+                    isLoading || hasError || !isAccessAllowed || isPrerollActive
+                      ? 'opacity-0 pointer-events-none'
+                      : 'opacity-100'
+                  }`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+                  allowFullScreen
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  onLoad={() => {
+                    if (!isPrerollActive) {
+                      setIsLoading(false);
+                      setHasError(false);
+                      setIsIframeLoaded(true);
+                    }
+                  }}
+                  onError={() => {
+                    if (!isPrerollActive) {
+                      setIsLoading(false);
+                      setHasError(true);
+                    }
+                  }}
+                />
+              ) : (
+                <video
+                  ref={videoRef}
+                  playsInline
+                  loop
+                  className={`w-full h-full object-cover transition-opacity duration-300 ${
+                    isLoading || hasError || !isAccessAllowed || isPrerollActive
+                      ? 'opacity-0 pointer-events-none'
+                      : 'opacity-100'
+                  }`}
+                  onWaiting={() => {
+                    if (!isPrerollActive) setIsLoading(true);
+                  }}
+                  onPlaying={() => {
+                    if (!isPrerollActive) {
+                      setIsLoading(false);
+                      setHasError(false);
+                    }
+                  }}
+                  onError={() => {
+                    if (!isPrerollActive) {
+                      setIsLoading(false);
+                      setHasError(true);
+                    }
+                  }}
+                />
+              )
             )}
 
             {/* PRE-ROLL VIDEO AD PLAYER OVERLAY */}
@@ -797,107 +935,227 @@ export const Player: React.FC<PlayerProps> = ({
               </div>
             )}
 
-            {/* STREAM CONTROLS OVERLAY (Visible when playing) */}
+            {/* STREAM CONTROLS OVERLAY */}
             {selectedChannel && isAccessAllowed && !hasError && !isPrerollActive && (
-              <div className="absolute inset-x-0 bottom-0 z-15 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-4 sm:p-5 flex flex-col gap-2 opacity-95 hover:opacity-100 transition-opacity">
-                {/* Control bar */}
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    {/* Play/Pause Button */}
-                    <button
-                      onClick={togglePlay}
-                      className="w-10 h-10 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center transition-colors cursor-pointer shadow-md"
-                      title={isPlaying ? 'Pausar (Espaço)' : 'Reproduzir (Espaço)'}
-                    >
-                      {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
-                    </button>
-
-                    {/* Volume Slider & Mute Toggle */}
-                    <div className="flex items-center gap-2 group">
-                      <button
-                        onClick={toggleMute}
-                        className="p-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                        title={isMuted ? 'Ativar Áudio (M)' : 'Silenciar (M)'}
-                      >
-                        {isMuted || volume === 0 ? <VolumeX className="w-5 h-5 text-red-400" /> : <Volume2 className="w-5 h-5" />}
-                      </button>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.05"
-                        value={isMuted ? 0 : volume}
-                        onChange={handleVolumeChange}
-                        className="w-16 sm:w-24 accent-blue-500 h-1.5 bg-slate-700 rounded-lg cursor-pointer"
-                        title="Volume"
-                      />
-                    </div>
-
-                    {/* Program Timecode Badge */}
-                    <div className="hidden sm:flex items-center gap-2 text-xs font-mono text-slate-300 bg-black/50 px-2.5 py-1 rounded-md border border-white/10">
-                      <span>{selectedChannel.currentProgramTime}</span>
-                    </div>
+              isExternalIframe ? (
+                /* External Iframe Floating Controls (Non-blocking, preserves iframe native player interactivity) */
+                <div className="absolute top-3 right-3 z-15 flex items-center gap-2 pointer-events-auto">
+                  <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md border border-blue-500/30 text-[11px] font-mono text-blue-300 shadow-lg">
+                    <Globe className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Player Externo (iframe)</span>
                   </div>
 
-                  {/* Right Controls: Quality, Aspect Ratio, Settings, Fullscreen */}
-                  <div className="flex items-center gap-1.5 sm:gap-2">
-                    {/* Quality Selector */}
-                    <div className="relative">
+                  {/* Refresh / Retry Iframe */}
+                  <button
+                    onClick={handleRetryStream}
+                    className="p-1.5 sm:px-2.5 sm:py-1 rounded-lg bg-black/75 hover:bg-slate-800 backdrop-blur-md border border-white/20 text-xs font-mono text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer shadow-lg"
+                    title="Recarregar player externo"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-slate-300" />
+                    <span className="hidden sm:inline">Recarregar</span>
+                  </button>
+
+                  {/* Proporção Aspect Ratio */}
+                  <button
+                    onClick={() => setAspectRatio169(!aspectRatio169)}
+                    className="p-1.5 sm:px-2.5 sm:py-1 rounded-lg bg-black/75 hover:bg-slate-800 backdrop-blur-md border border-white/20 text-xs font-mono text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer shadow-lg"
+                    title="Alternar proporção do contêiner"
+                  >
+                    <Settings2 className="w-3.5 h-3.5 text-blue-400" />
+                    <span className="font-mono">{aspectRatio169 ? '16:9' : '4:3'}</span>
+                  </button>
+
+                  {/* Container Fullscreen (Preserves Gato Net In-Play Banners) */}
+                  <button
+                    onClick={toggleFullscreen}
+                    className="p-1.5 sm:px-2.5 sm:py-1 rounded-lg bg-blue-600/90 hover:bg-blue-500 backdrop-blur-md border border-blue-400/30 text-xs font-medium text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-lg"
+                    title={isFullscreen ? 'Sair da tela cheia Gato Net (F)' : 'Tela cheia Gato Net (preserva banners In-Play)'}
+                  >
+                    {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                    <span className="hidden md:inline">{isFullscreen ? 'Sair' : 'Tela Cheia'}</span>
+                  </button>
+                </div>
+              ) : (
+                /* Internal Video Controls (Full Playback Bar) */
+                <div className="absolute inset-x-0 bottom-0 z-15 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-4 sm:p-5 flex flex-col gap-2 opacity-95 hover:opacity-100 transition-opacity">
+                  {/* Control bar */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      {/* Play/Pause Button */}
                       <button
-                        onClick={() => setShowSettings(!showSettings)}
-                        className="px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-white/10 border border-white/15 text-xs font-mono font-medium text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
-                        title="Ajustar Qualidade"
+                        onClick={togglePlay}
+                        className="w-10 h-10 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center transition-colors cursor-pointer shadow-md"
+                        title={isPlaying ? 'Pausar (Espaço)' : 'Reproduzir (Espaço)'}
                       >
-                        <Settings2 className="w-3.5 h-3.5 text-blue-400" />
-                        <span>{activeQuality}</span>
+                        {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
                       </button>
 
-                      {showSettings && (
-                        <div className="absolute right-0 bottom-full mb-2 w-44 rounded-xl bg-[#0b1329] border border-blue-500/30 shadow-2xl p-2 z-50 text-xs">
-                          <span className="block px-2 py-1 text-[10px] font-mono text-slate-400 uppercase">
-                            Resolução de Teste
-                          </span>
-                          {(['Auto', '1080p', '720p', '480p'] as const).map((q) => (
+                      {/* Volume Slider & Mute Toggle */}
+                      <div className="flex items-center gap-2 group">
+                        <button
+                          onClick={toggleMute}
+                          className="p-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                          title={isMuted ? 'Ativar Áudio (M)' : 'Silenciar (M)'}
+                        >
+                          {isMuted || volume === 0 ? <VolumeX className="w-5 h-5 text-red-400" /> : <Volume2 className="w-5 h-5" />}
+                        </button>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={isMuted ? 0 : volume}
+                          onChange={handleVolumeChange}
+                          className="w-16 sm:w-24 accent-blue-500 h-1.5 bg-slate-700 rounded-lg cursor-pointer"
+                          title="Volume"
+                        />
+                      </div>
+
+                      {/* Program Timecode Badge */}
+                      <div className="hidden sm:flex items-center gap-2 text-xs font-mono text-slate-300 bg-black/50 px-2.5 py-1 rounded-md border border-white/10">
+                        <span>{selectedChannel.currentProgramTime}</span>
+                      </div>
+                    </div>
+
+                    {/* Right Controls: Quality, Aspect Ratio, Settings, Fullscreen */}
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      {/* Quality Selector */}
+                      <div className="relative">
+                        <button
+                          onClick={() => setShowSettings(!showSettings)}
+                          className="px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-white/10 border border-white/15 text-xs font-mono font-medium text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Ajustar Qualidade"
+                        >
+                          <Settings2 className="w-3.5 h-3.5 text-blue-400" />
+                          <span>{activeQuality}</span>
+                        </button>
+
+                        {showSettings && (
+                          <div className="absolute right-0 bottom-full mb-2 w-44 rounded-xl bg-[#0b1329] border border-blue-500/30 shadow-2xl p-2 z-50 text-xs">
+                            <span className="block px-2 py-1 text-[10px] font-mono text-slate-400 uppercase">
+                              Resolução de Teste
+                            </span>
+                            {(['Auto', '1080p', '720p', '480p'] as const).map((q) => (
+                              <button
+                                key={q}
+                                onClick={() => {
+                                  setActiveQuality(q);
+                                  setShowSettings(false);
+                                }}
+                                className={`w-full text-left px-2.5 py-1.5 rounded-lg font-mono flex items-center justify-between cursor-pointer ${
+                                  activeQuality === q
+                                    ? 'bg-blue-600 text-white font-bold'
+                                    : 'text-slate-300 hover:bg-white/10'
+                                }`}
+                              >
+                                <span>{q}</span>
+                                {activeQuality === q && <span className="text-[10px]">Ativo</span>}
+                              </button>
+                            ))}
+                            <div className="my-1 border-t border-slate-800" />
                             <button
-                              key={q}
                               onClick={() => {
-                                setActiveQuality(q);
+                                setAspectRatio169(!aspectRatio169);
                                 setShowSettings(false);
                               }}
-                              className={`w-full text-left px-2.5 py-1.5 rounded-lg font-mono flex items-center justify-between cursor-pointer ${
-                                activeQuality === q
-                                  ? 'bg-blue-600 text-white font-bold'
-                                  : 'text-slate-300 hover:bg-white/10'
-                              }`}
+                              className="w-full text-left px-2.5 py-1.5 rounded-lg text-slate-300 hover:bg-white/10 flex items-center justify-between cursor-pointer"
                             >
-                              <span>{q}</span>
-                              {activeQuality === q && <span className="text-[10px]">Ativo</span>}
+                              <span>Proporção</span>
+                              <span className="font-mono text-blue-400">{aspectRatio169 ? '16:9' : '4:3'}</span>
                             </button>
-                          ))}
-                          <div className="my-1 border-t border-slate-800" />
-                          <button
-                            onClick={() => {
-                              setAspectRatio169(!aspectRatio169);
-                              setShowSettings(false);
-                            }}
-                            className="w-full text-left px-2.5 py-1.5 rounded-lg text-slate-300 hover:bg-white/10 flex items-center justify-between cursor-pointer"
-                          >
-                            <span>Proporção</span>
-                            <span className="font-mono text-blue-400">{aspectRatio169 ? '16:9' : '4:3'}</span>
-                          </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Fullscreen Button */}
+                      <button
+                        onClick={toggleFullscreen}
+                        className="p-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                        title={isFullscreen ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'}
+                      >
+                        {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+
+            {/* BANNER IN-PLAY NO PLAYER DE VÍDEO (OVERLAY SOBRE O VÍDEO / IFRAME) */}
+            {selectedChannel && isAccessAllowed && (isExternalIframe ? isIframeLoaded : isPlaying) && !isPrerollActive && isInPlayVisible && inPlayConfig && (
+              <div
+                className={`absolute z-18 pointer-events-auto ${
+                  inPlayConfig.position === 'bottom_left'
+                    ? 'bottom-20 sm:bottom-24 left-4 max-w-[92%] sm:max-w-md'
+                    : inPlayConfig.position === 'bottom_right'
+                    ? 'bottom-20 sm:bottom-24 right-4 max-w-[92%] sm:max-w-md'
+                    : 'bottom-20 sm:bottom-24 left-1/2 -translate-x-1/2 w-[94%] max-w-[500px] sm:max-w-[620px]'
+                }`}
+                style={{
+                  opacity: isInPlayFadingOut ? 0 : 1,
+                  transition: `opacity ${inPlayConfig.fadeOutSeconds || 1}s ease-in-out`
+                }}
+              >
+                <div className="relative rounded-2xl bg-[#080d1e]/95 border border-blue-500/40 shadow-2xl backdrop-blur-md overflow-hidden p-2.5 sm:p-3">
+                  {/* Close button (when enabled) */}
+                  {inPlayConfig.closeButtonEnabled && (
+                    <button
+                      type="button"
+                      onClick={handleCloseInPlay}
+                      className="absolute top-2 right-2 p-1 rounded-full bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer z-20 shadow-md"
+                      title="Fechar publicidade"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
+                  {/* Format 1: Script isolated sandbox iframe */}
+                  {inPlayConfig.adFormat === 'script' && inPlayConfig.adScriptCode ? (
+                    <div className="w-full min-h-[65px] max-h-[90px] flex items-center justify-center overflow-hidden">
+                      <iframe
+                        srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:0;background:transparent;display:flex;justify-content:center;align-items:center;overflow:hidden;font-family:sans-serif;}</style></head><body>${inPlayConfig.adScriptCode}</body></html>`}
+                        sandbox="allow-scripts allow-popups allow-forms"
+                        title="Anúncio In-Play"
+                        className="w-full h-[70px] sm:h-[85px] border-0"
+                      />
+                    </div>
+                  ) : (
+                    /* Format 2: Custom Banner with Image and Link */
+                    <div className="flex items-center gap-3 pr-6">
+                      {inPlayConfig.bannerImageUrl && (
+                        <img
+                          src={inPlayConfig.bannerImageUrl}
+                          alt={inPlayConfig.bannerTitle || 'Publicidade'}
+                          className="h-12 sm:h-14 w-auto max-w-[130px] rounded-lg object-contain bg-black/40 border border-slate-800 shrink-0"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
+                            Publicidade
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono truncate">In-Play</span>
                         </div>
+                        <p className="text-xs sm:text-sm font-semibold text-white truncate">
+                          {inPlayConfig.bannerTitle || 'Anúncio em Destaque'}
+                        </p>
+                      </div>
+                      {inPlayConfig.bannerTargetUrl && (
+                        <a
+                          href={inPlayConfig.bannerTargetUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shrink-0 flex items-center gap-1.5 shadow-md shadow-blue-900/40 transition-colors cursor-pointer"
+                        >
+                          <span>Acessar</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
                       )}
                     </div>
-
-                    {/* Fullscreen Button */}
-                    <button
-                      onClick={toggleFullscreen}
-                      className="p-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                      title={isFullscreen ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'}
-                    >
-                      {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-                    </button>
-                  </div>
+                  )}
                 </div>
               </div>
             )}

@@ -72,6 +72,9 @@ export interface DbChannel {
   is_active: boolean;
   status?: 'active' | 'inactive' | 'maintenance';
   access_permission?: 'free' | 'restricted';
+  player_type?: 'internal' | 'external_iframe';
+  iframe_code?: string | null;
+  iframe_url?: string | null;
   description: string;
   created_at: string;
   updated_at: string;
@@ -187,6 +190,12 @@ export interface DbAdSlot {
   dimensions: string;
   code_snippet: string | null;
   is_enabled: boolean;
+  ad_type?: 'none' | 'image_upload' | 'image_url' | 'code_script';
+  advertiser_name?: string | null;
+  alt_text?: string | null;
+  open_in_new_tab?: boolean;
+  show_placeholder_when_empty?: boolean;
+  created_at?: string;
   updated_at: string;
 }
 
@@ -196,6 +205,8 @@ export interface DbAccessModes {
   allow_public_browse: boolean;
   max_simultaneous_streams: number;
   stream_relay_enabled: boolean;
+  allowed_iframe_domains?: string[];
+  default_home_tab?: string;
   updated_at: string;
 }
 
@@ -289,5 +300,89 @@ export interface DbPrerollEvent {
   ip_address: string | null;
   user_agent: string | null;
   created_at: string;
+}
+
+export interface DbInPlaySettings {
+  id: string; // 'primary'
+  is_enabled: boolean;
+  ad_format: 'script' | 'custom_banner';
+  ad_script_code: string;
+  banner_image_url: string | null;
+  banner_target_url: string | null;
+  banner_title: string | null;
+  position: 'bottom_center' | 'bottom_left' | 'bottom_right';
+  delay_seconds: number;
+  interval_minutes: number;
+  duration_seconds: number;
+  fade_out_seconds: number;
+  close_button_enabled: boolean;
+  target_type: 'all' | 'channels' | 'categories';
+  target_channel_ids: string[];
+  target_category_ids: string[];
+  exempt_plan_ids: string[];
+  updated_at: string;
+}
+
+export interface DbAuthorizedIframeDomain {
+  id: string;
+  domain: string;
+  is_active: boolean;
+  added_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbFootballTeam {
+  id: string;
+  name: string;
+  short_name: string | null;
+  logo_url: string;
+  country: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbFootballMatchChannel {
+  channel_id: string;
+  channel_name: string;
+  channel_number?: number;
+  is_primary?: boolean;
+}
+
+export interface DbFootballMatch {
+  id: string;
+  competition: string;
+  competition_country: string | null;
+  round: string | null;
+  home_team_id: string | null;
+  home_team_name: string;
+  home_team_logo: string;
+  away_team_id: string | null;
+  away_team_name: string;
+  away_team_logo: string;
+  match_date: string; // YYYY-MM-DD
+  match_time: string; // HH:MM
+  timezone: string;
+  description: string | null;
+  channels: DbFootballMatchChannel[];
+  primary_channel_id: string | null;
+  status: 'scheduled' | 'live' | 'finished' | 'postponed' | 'cancelled';
+  score_home: number | null;
+  score_away: number | null;
+  minute: string | null;
+  is_active: boolean;
+  is_featured: boolean;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbFootballAgendaSettings {
+  id: string;
+  is_enabled: boolean;
+  days_to_display: number;
+  hide_finished_after_hours: number;
+  default_view_mode: 'live_first' | 'chronological';
+  updated_at: string;
 }
 
