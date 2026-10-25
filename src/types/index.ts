@@ -39,6 +39,7 @@ export interface Channel {
   categoryId: string;
   categoryName: string;
   logo: string;
+  coverImage?: string | null;
   streamUrl: string;
   alternativeStreams: (string | BackupStreamItem)[];
   resolution: '4K' | '1080p' | '720p';

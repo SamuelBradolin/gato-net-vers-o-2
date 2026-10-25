@@ -1387,52 +1387,6 @@ export const FootballAgendaAdmin: React.FC<FootballAgendaAdminProps> = ({
                     />
                   </div>
                 </div>
-
-                {/* Score & Minute inputs if live or finished */}
-                {(formStatus === 'live' || formStatus === 'finished') && (
-                  <div className="pt-2 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1">
-                        Gols Mandante ({formHomeTeamName || 'Mandante'})
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        placeholder="0"
-                        value={formScoreHome}
-                        onChange={(e) => setFormScoreHome(e.target.value)}
-                        className="w-full px-3 py-1.5 text-xs font-mono font-bold rounded-lg bg-[#090f20] border border-slate-700 text-white"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1">
-                        Gols Visitante ({formAwayTeamName || 'Visitante'})
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        placeholder="0"
-                        value={formScoreAway}
-                        onChange={(e) => setFormScoreAway(e.target.value)}
-                        className="w-full px-3 py-1.5 text-xs font-mono font-bold rounded-lg bg-[#090f20] border border-slate-700 text-white"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1">
-                        Minuto / Tempo
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ex: 68', Intervalo, 2T"
-                        value={formMinute}
-                        onChange={(e) => setFormMinute(e.target.value)}
-                        className="w-full px-3 py-1.5 text-xs font-mono rounded-lg bg-[#090f20] border border-slate-700 text-white"
-                      />
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Seção 4: Canais de Transmissão Vinculados */}

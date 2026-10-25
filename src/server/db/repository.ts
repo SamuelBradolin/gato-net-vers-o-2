@@ -550,19 +550,20 @@ export async function createChannel(channel: Omit<DbChannel, 'created_at' | 'upd
     try {
       await getPostgresPool()!.query(
         `INSERT INTO channels (
-           id, number, name, category_id, logo_url, backup_image_url, stream_url,
+           id, number, name, category_id, logo_url, cover_image_url, backup_image_url, stream_url,
            alternative_streams, resolution, aspect_ratio, current_program, current_program_time,
            next_program, is_live, is_locked, is_featured, is_active, status, access_permission,
            player_type, iframe_code, iframe_url,
            description, created_at, updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`,
         [
           newChan.id,
           newChan.number,
           newChan.name,
           newChan.category_id,
           newChan.logo_url,
+          newChan.cover_image_url || null,
           newChan.backup_image_url || null,
           newChan.stream_url,
           JSON.stringify(newChan.alternative_streams || []),

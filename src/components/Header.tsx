@@ -58,7 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
               href="#canais"
               className="hover:text-blue-400 transition-colors whitespace-nowrap shrink-0"
             >
-              Canais Demonstrativos
+              Canais
             </a>
             <a
               href="#canais"
@@ -89,24 +89,19 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Zone 3: Primary Action & Admin Navigation */}
+        {/* Zone 3: Primary Action & Authentication */}
         <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
-          {/* Admin Toggle Button */}
-          <button
-            onClick={onOpenAdmin}
-            className={`px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 tv-focus-target ${
-              isAdminMode
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'bg-[#0b1329] text-blue-400 hover:bg-[#0f1b3d] border border-blue-800/40'
-            }`}
-            title="Acessar o Painel Administrativo da Gato Net"
-          >
-            <Shield className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">
-              {isAdminMode ? 'Voltar para a TV' : 'Painel Admin'}
-            </span>
-            <span className="sm:hidden">Admin</span>
-          </button>
+          {/* Admin Toggle Button (Oculto na visualização pública; acesso exclusivo pelo ano 2026 no rodapé) */}
+          {isAdminMode && (
+            <button
+              onClick={onOpenAdmin}
+              className="px-3 py-2 text-xs font-semibold rounded-lg bg-blue-600 text-white shadow-md flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 tv-focus-target"
+              title="Voltar para a TV"
+            >
+              <Shield className="w-3.5 h-3.5" />
+              <span>Voltar para a TV</span>
+            </button>
+          )}
 
           {/* Subscriber Simultaneous Screens Control */}
           {userEmail && onOpenSessions && (
@@ -172,7 +167,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => setMobileMenuOpen(false)}
               className="py-2 px-3 rounded-lg hover:bg-blue-950/60 text-slate-200"
             >
-              Canais Demonstrativos
+              Canais
             </a>
             <button
               onClick={() => {
@@ -184,16 +179,18 @@ export const Header: React.FC<HeaderProps> = ({
               <span>Atalhos para Smart TV & Teclado</span>
               <Tv className="w-4 h-4 text-blue-400" />
             </button>
-            <button
-              onClick={() => {
-                setMobileMenuOpen(false);
-                onOpenAdmin();
-              }}
-              className="w-full text-left py-2 px-3 rounded-lg hover:bg-blue-950/60 text-blue-400 flex items-center justify-between font-semibold"
-            >
-              <span>{isAdminMode ? 'Voltar para Modo TV' : 'Painel Administrativo'}</span>
-              <Shield className="w-4 h-4" />
-            </button>
+            {isAdminMode && (
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenAdmin();
+                }}
+                className="w-full text-left py-2 px-3 rounded-lg hover:bg-blue-950/60 text-blue-400 flex items-center justify-between font-semibold"
+              >
+                <span>Voltar para Modo TV</span>
+                <Shield className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
       )}

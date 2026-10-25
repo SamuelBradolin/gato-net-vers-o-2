@@ -165,6 +165,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [channelFormName, setChannelFormName] = useState('');
   const [channelFormCategory, setChannelFormCategory] = useState(categories[1]?.id || 'cat_aberta');
   const [channelFormLogo, setChannelFormLogo] = useState('');
+  const [channelFormCoverImage, setChannelFormCoverImage] = useState('');
   const [channelFormStreamUrl, setChannelFormStreamUrl] = useState('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
   const [channelFormAltStreams, setChannelFormAltStreams] = useState<Array<{ url: string; priority: number; label: string }>>([]);
   const [channelFormResolution, setChannelFormResolution] = useState<'1080p' | '4K' | '720p'>('1080p');
@@ -1704,6 +1705,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             categoryId: c.category_id,
             categoryName: c.category_name || categories.find(cat => cat.id === c.category_id)?.name || 'Variedades',
             logo: c.logo_url,
+            coverImage: c.cover_image_url || null,
             backupImage: c.backup_image_url || '/src/assets/images/gato_net_hero_backdrop_1792172574872.jpg',
             streamUrl: c.stream_url,
             alternativeStreams: c.alternative_streams || [],
@@ -1735,6 +1737,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setChannelFormName('');
     setChannelFormCategory(categories.find(c => c.id !== 'cat_all')?.id || categories[0]?.id || 'cat_aberta');
     setChannelFormLogo('');
+    setChannelFormCoverImage('');
     setChannelFormPlayerType('internal');
     setChannelFormIframeCode('');
     setChannelFormIframeTestUrl('');
@@ -1757,6 +1760,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setChannelFormName(ch.name);
     setChannelFormCategory(ch.categoryId);
     setChannelFormLogo(ch.logo || '');
+    setChannelFormCoverImage(ch.coverImage || '');
     setChannelFormPlayerType(ch.playerType || 'internal');
     setChannelFormIframeCode(ch.iframeCode || '');
     setChannelFormIframeTestUrl(ch.iframeUrl || '');
@@ -1854,6 +1858,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       name: channelFormName.trim(),
       category_id: channelFormCategory,
       logo_url: channelFormLogo.trim() || 'https://images.unsplash.com/photo-1598899134739-24c46f58b8c0?auto=format&fit=crop&w=160&q=80',
+      cover_image_url: channelFormCoverImage.trim() || null,
       player_type: channelFormPlayerType,
       iframe_code: channelFormPlayerType === 'external_iframe' ? channelFormIframeCode.trim() : null,
       stream_url: channelFormStreamUrl.trim() || (channelFormPlayerType === 'external_iframe' ? (channelFormIframeTestUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4') : ''),
@@ -2837,12 +2842,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 <span className="font-mono text-slate-400 font-bold w-7 text-right">
                                   #{ch.number}
                                 </span>
-                                <div className="w-9 h-9 rounded-lg bg-black flex items-center justify-center overflow-hidden shrink-0 border border-slate-700">
+                                <div className="w-9 h-9 rounded-lg bg-black flex items-center justify-center overflow-hidden shrink-0 border border-slate-700 p-0.5">
                                   {ch.logo ? (
                                     <img
                                       src={ch.logo}
                                       alt={ch.name}
-                                      className="w-full h-full object-cover"
+                                      className="w-full h-full object-contain"
                                       referrerPolicy="no-referrer"
                                       onError={(e) => {
                                         (e.currentTarget as HTMLElement).style.display = 'none';
@@ -3071,12 +3076,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           Logotipo do Canal (Upload de Imagem ou URL)
                         </label>
                         <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-lg bg-black border border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
+                          <div className="w-12 h-12 rounded-lg bg-black border border-slate-700 flex items-center justify-center overflow-hidden shrink-0 p-1">
                             {channelFormLogo ? (
                               <img
                                 src={channelFormLogo}
                                 alt="Preview Logo"
-                                className="w-full h-full object-cover"
+                                className="w-full h-full object-contain"
                                 onError={(e) => {
                                   (e.currentTarget as HTMLElement).style.display = 'none';
                                 }}
@@ -3102,18 +3107,127 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   type="file"
                                   accept="image/*"
                                   className="hidden"
-                                  onChange={(e) => {
+                                  onChange={async (e) => {
                                     const file = e.target.files?.[0];
                                     if (file) {
-                                      const reader = new FileReader();
-                                      reader.onload = () => setChannelFormLogo(reader.result as string);
-                                      reader.readAsDataURL(file);
+                                      const uploadedUrl = await handleUploadImage(file, 'logo');
+                                      if (uploadedUrl) {
+                                        setChannelFormLogo(uploadedUrl);
+                                      } else {
+                                        const reader = new FileReader();
+                                        reader.onload = () => setChannelFormLogo(reader.result as string);
+                                        reader.readAsDataURL(file);
+                                      }
                                     }
                                   }}
                                 />
                               </label>
                               <span className="text-[10px] text-slate-400">
                                 PNG, JPG ou SVG (Dimensões ideais: 160x160)
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Linha 2.1: Novo Campo - Capa do Canal (Upload de Imagem ou URL) */}
+                      <div className="p-3.5 rounded-xl bg-[#060911] border border-blue-900/40 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="block text-xs font-bold text-white flex items-center gap-1.5">
+                              <Image className="w-3.5 h-3.5 text-blue-400" />
+                              <span>Capa do Canal (Upload de Imagem ou URL)</span>
+                            </label>
+                            <span className="text-[11px] text-slate-400 block mt-0.5">
+                              Dimensão recomendada: 1280 × 720 pixels, proporção 16:9.
+                            </span>
+                          </div>
+                          {channelFormCoverImage && (
+                            <button
+                              type="button"
+                              onClick={() => setChannelFormCoverImage('')}
+                              className="px-2 py-1 rounded-md bg-red-950/60 hover:bg-red-900 border border-red-800/40 text-red-300 text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Remover capa cadastrada"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>Remover Capa</span>
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-start">
+                          {/* Prévia da Capa (16:9) */}
+                          <div className="sm:col-span-4 aspect-video rounded-lg overflow-hidden bg-black border border-slate-700 relative flex items-center justify-center">
+                            {channelFormCoverImage ? (
+                              <>
+                                <img
+                                  src={channelFormCoverImage}
+                                  alt="Prévia da Capa"
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLElement).style.display = 'none';
+                                  }}
+                                />
+                                <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/75 text-[10px] font-mono text-slate-300 border border-white/10">
+                                  16:9
+                                </div>
+                              </>
+                            ) : (
+                              <div className="text-center p-2 text-slate-500 flex flex-col items-center">
+                                <Image className="w-6 h-6 mb-1 text-slate-600" />
+                                <span className="text-[10px]">Sem capa cadastrada</span>
+                                <span className="text-[9px] text-slate-600">(Usa fundo padrão)</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Controles de URL e Upload */}
+                          <div className="sm:col-span-8 space-y-2">
+                            <input
+                              type="text"
+                              placeholder="https://... Insira a URL da imagem da capa"
+                              value={channelFormCoverImage}
+                              onChange={(e) => setChannelFormCoverImage(e.target.value)}
+                              className="w-full px-3 py-1.5 text-xs font-mono rounded-lg bg-[#090f20] border border-slate-700 text-white focus:outline-none focus:border-blue-500"
+                            />
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <label className="px-3 py-1.5 rounded-lg bg-blue-600/90 hover:bg-blue-500 text-white text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-colors shadow">
+                                <Upload className="w-3.5 h-3.5" />
+                                <span>{channelFormCoverImage ? 'Substituir Imagem' : 'Enviar do Computador'}</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      const url = await handleUploadImage(file, 'channel');
+                                      if (url) {
+                                        setChannelFormCoverImage(url);
+                                      } else {
+                                        const reader = new FileReader();
+                                        reader.onload = () => setChannelFormCoverImage(reader.result as string);
+                                        reader.readAsDataURL(file);
+                                      }
+                                    }
+                                  }}
+                                />
+                              </label>
+
+                              {channelFormCoverImage && (
+                                <button
+                                  type="button"
+                                  onClick={() => setChannelFormCoverImage('')}
+                                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                                >
+                                  <X className="w-3.5 h-3.5 text-slate-400" />
+                                  <span>Limpar</span>
+                                </button>
+                              )}
+
+                              <span className="text-[10px] text-slate-400">
+                                Formatos: PNG, JPG, WEBP (1280x720)
                               </span>
                             </div>
                           </div>

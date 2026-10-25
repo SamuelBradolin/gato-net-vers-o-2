@@ -104,38 +104,38 @@ export const FeaturedCarousel: React.FC<FeaturedCarouselProps> = ({
               Pronto para sintonizar a Gato Net
             </h2>
             <p className="text-sm text-slate-300 mt-1.5 leading-relaxed">
-              Selecione qualquer canal demonstrativo na grade abaixo para iniciar a reprodução.
+              Selecione qualquer canal na grade abaixo para iniciar a reprodução.
             </p>
           </div>
 
           <div className="pt-2">
             <span className="block text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2.5">
-              Canais Demonstrativos Disponíveis:
+              Canais Disponíveis:
             </span>
             <div className="flex flex-wrap items-center justify-center gap-2">
               <button
                 onClick={() => onSelectQuickChannel('ch_globo')}
                 className="px-3 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 border border-blue-500/30 text-xs font-semibold text-white transition-colors cursor-pointer"
               >
-                Rede Globo (Demo)
+                Rede Globo
               </button>
               <button
                 onClick={() => onSelectQuickChannel('ch_gato_esportes_1')}
                 className="px-3 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 border border-blue-500/30 text-xs font-semibold text-white transition-colors cursor-pointer"
               >
-                Gato Esporte 1 (Demo)
+                Gato Esporte 1
               </button>
               <button
                 onClick={() => onSelectQuickChannel('ch_cine_prime')}
                 className="px-3 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 border border-blue-500/30 text-xs font-semibold text-white transition-colors cursor-pointer"
               >
-                Cine Prime (Demo)
+                Cine Prime
               </button>
               <button
                 onClick={() => onSelectQuickChannel('ch_gato_news_24h')}
                 className="px-3 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900 border border-blue-500/30 text-xs font-semibold text-white transition-colors cursor-pointer"
               >
-                Gato Notícias (Demo)
+                Gato Notícias
               </button>
             </div>
           </div>
@@ -179,22 +179,9 @@ export const FeaturedCarousel: React.FC<FeaturedCarouselProps> = ({
       ))}
 
       {/* Top Header Information Ribbon */}
-      <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-600/90 text-white text-[11px] font-bold tracking-wider uppercase shadow-lg shadow-blue-900/50 backdrop-blur-sm border border-blue-400/40">
-            <Sparkles className="w-3 h-3 text-cyan-200 animate-pulse" />
-            <span>Destaque da Programação</span>
-          </div>
-
-          {current.isDemo && (
-            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
-              Demonstração
-            </span>
-          )}
-        </div>
-
-        {/* Rotation Controls (Pause/Play) */}
-        {totalSlides > 1 && (
+      {totalSlides > 1 && (
+        <div className="absolute top-4 right-4 z-20 flex items-center justify-end">
+          {/* Rotation Controls (Pause/Play) */}
           <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/10">
             <button
               onClick={() => setIsPaused((prev) => !prev)}
@@ -208,8 +195,8 @@ export const FeaturedCarousel: React.FC<FeaturedCarouselProps> = ({
               {currentIndex + 1}/{totalSlides}
             </span>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <div className="relative z-20 p-5 sm:p-8 max-w-2xl space-y-3">
@@ -255,11 +242,6 @@ export const FeaturedCarousel: React.FC<FeaturedCarouselProps> = ({
             <Play className="w-4 h-4 fill-white transition-transform group-hover:scale-110" />
             <span>{current.buttonText || 'Assistir agora'}</span>
           </button>
-
-          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 font-mono">
-            <Info className="w-3 h-3 text-slate-500" />
-            Verificação de permissão e assinatura ao sintonizar
-          </span>
         </div>
       </div>
 

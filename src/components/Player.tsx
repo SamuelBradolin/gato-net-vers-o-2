@@ -550,11 +550,11 @@ export const Player: React.FC<PlayerProps> = ({
             <div className="flex items-center gap-3 min-w-0">
               {selectedChannel ? (
                 <>
-                  <div className="w-8 h-8 rounded-lg bg-blue-950 border border-blue-500/30 flex items-center justify-center overflow-hidden shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-blue-950 border border-blue-500/30 flex items-center justify-center overflow-hidden shrink-0 p-1">
                     <img
                       src={selectedChannel.logo}
                       alt={selectedChannel.name}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-contain"
                       referrerPolicy="no-referrer"
                       onError={(e) => {
                         (e.currentTarget as HTMLElement).style.display = 'none';
@@ -567,15 +567,6 @@ export const Player: React.FC<PlayerProps> = ({
                       <h3 className="font-bold text-white text-sm sm:text-base truncate">
                         {selectedChannel.name}
                       </h3>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {/* Clear DEMO badge without claiming live TV */}
-                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold font-mono tracking-wider bg-blue-600/90 text-white">
-                          DEMO
-                        </span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/50">
-                          Sinal de Teste
-                        </span>
-                      </div>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-slate-400 truncate">
                       <span>{selectedChannel.categoryName}</span>
@@ -598,25 +589,11 @@ export const Player: React.FC<PlayerProps> = ({
             </div>
 
             {/* Quick Status Indicator */}
-            <div className="flex items-center gap-3 shrink-0">
-              {selectedChannel && (
-                <button
-                  onClick={() => setHasError(!hasError)}
-                  title="Testar resposta visual de falha de transmissão"
-                  className="hidden sm:flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded bg-slate-900/80 hover:bg-slate-800 border border-slate-700/60 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
-                >
-                  <AlertTriangle className="w-3 h-3 text-amber-400" />
-                  <span>{hasError ? 'Restaurar Sinal' : 'Testar Erro'}</span>
-                </button>
-              )}
-              <div className="flex items-center gap-1.5 text-xs font-mono">
-                {hasError ? (
-                  <span className="text-red-400 font-semibold">SINAL INDISPONÍVEL</span>
-                ) : (
-                  <span className="text-blue-400 font-semibold">HOMOLOGAÇÃO</span>
-                )}
+            {hasError && (
+              <div className="flex items-center gap-1.5 text-xs font-mono shrink-0">
+                <span className="text-red-400 font-semibold">SINAL INDISPONÍVEL</span>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Video Container Aspect Ratio 16:9 */}
@@ -739,11 +716,6 @@ export const Player: React.FC<PlayerProps> = ({
                     <div className="text-xs text-white truncate font-medium">
                       Patrocínio: <span className="font-bold text-amber-300">{currentPrerollAd.sponsorName}</span>
                     </div>
-                    {currentPrerollAd.isDemo && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 hidden sm:inline-block">
-                        Demonstração
-                      </span>
-                    )}
                   </div>
 
                   {currentPrerollAd.targetUrl && (
@@ -904,7 +876,7 @@ export const Player: React.FC<PlayerProps> = ({
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 pointer-events-none">
                 <div className="w-12 h-12 rounded-full border-3 border-blue-500/30 border-t-blue-400 animate-spin" />
                 <span className="mt-3 text-xs font-mono font-medium text-slate-200 tracking-wide">
-                  Carregando sinal demonstrativo...
+                  Carregando sinal...
                 </span>
               </div>
             )}
@@ -917,10 +889,10 @@ export const Player: React.FC<PlayerProps> = ({
                     <AlertTriangle className="w-6 h-6" />
                   </div>
                   <h3 className="text-base sm:text-lg font-bold text-white">
-                    Sinal Demonstrativo Indisponível
+                    Sinal Temporariamente Indisponível
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                    A fonte demonstrativa está temporariamente indisponível. A interface está preparada para reconexão ou alternância para fonte de contingência.
+                    A transmissão está temporariamente indisponível. Clique abaixo para tentar reconectar.
                   </p>
                   <div className="flex items-center justify-center gap-3 pt-2">
                     <button
@@ -1033,7 +1005,7 @@ export const Player: React.FC<PlayerProps> = ({
                         {showSettings && (
                           <div className="absolute right-0 bottom-full mb-2 w-44 rounded-xl bg-[#0b1329] border border-blue-500/30 shadow-2xl p-2 z-50 text-xs">
                             <span className="block px-2 py-1 text-[10px] font-mono text-slate-400 uppercase">
-                              Resolução de Teste
+                              Resolução
                             </span>
                             {(['Auto', '1080p', '720p', '480p'] as const).map((q) => (
                               <button
@@ -1171,9 +1143,9 @@ export const Player: React.FC<PlayerProps> = ({
                 <span className="truncate font-medium">{selectedChannel.nextProgram || 'Programação Noturna'}</span>
               </div>
               <div className="flex items-center gap-2 text-slate-400 text-xs shrink-0 font-mono">
-                <span>Canal Demonstrativo</span>
+                <span className="text-blue-400">{selectedChannel.resolution || '1080p'}</span>
                 <span aria-hidden="true">·</span>
-                <span className="text-blue-400">Etapa 1 (Homologação)</span>
+                <span>{selectedChannel.aspectRatio || '16:9'}</span>
               </div>
             </div>
           )}

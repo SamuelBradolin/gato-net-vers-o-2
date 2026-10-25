@@ -43,7 +43,7 @@ export const Footer: React.FC<FooterProps> = ({
             <ul className="space-y-2">
               <li>
                 <a href="#canais" className="hover:text-blue-400 transition-colors">
-                  Grade de Canais Demonstrativos
+                  Grade de Canais
                 </a>
               </li>
               <li>
@@ -52,14 +52,6 @@ export const Footer: React.FC<FooterProps> = ({
                   className="hover:text-blue-400 transition-colors cursor-pointer text-left"
                 >
                   Controle Remoto Smart TV
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={onOpenAdmin}
-                  className="hover:text-blue-400 transition-colors cursor-pointer text-left text-blue-400 font-semibold"
-                >
-                  Painel Administrativo
                 </button>
               </li>
             </ul>
@@ -71,36 +63,39 @@ export const Footer: React.FC<FooterProps> = ({
               Categorias em Destaque
             </h4>
             <ul className="space-y-2">
-              <li><span className="text-slate-300">TV Aberta</span> · 5 canais (Demo)</li>
-              <li><span className="text-slate-300">Esportes & Futebol</span> · 3 canais (Demo)</li>
-              <li><span className="text-slate-300">Filmes e Séries</span> · 3 canais (Demo)</li>
-              <li><span className="text-slate-300">Notícias 24 Horas</span> · 2 canais (Demo)</li>
-              <li><span className="text-slate-300">Infantil & Desenhos</span> · 2 canais (Demo)</li>
+              <li><span className="text-slate-300">TV Aberta</span> · 5 canais</li>
+              <li><span className="text-slate-300">Esportes & Futebol</span> · 3 canais</li>
+              <li><span className="text-slate-300">Filmes e Séries</span> · 3 canais</li>
+              <li><span className="text-slate-300">Notícias 24 Horas</span> · 2 canais</li>
+              <li><span className="text-slate-300">Infantil & Desenhos</span> · 2 canais</li>
             </ul>
           </div>
 
-          {/* Sobre a Plataforma (Substituindo dados técnicos da VPS no rodapé público) */}
+          {/* Sobre a Gato Net */}
           <div>
             <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-3">
               Sobre a Gato Net
             </h4>
-            <p className="text-slate-400 text-xs leading-relaxed mb-3">
-              Ambiente demonstrativo da Etapa 1. Todos os canais disponibilizados utilizam dados e fontes de teste claramente identificados.
-            </p>
-            <div className="p-3 rounded-xl bg-[#090e1c] border border-blue-950 text-slate-300 text-[11px] flex items-center gap-2">
-              <Shield className="w-4 h-4 text-blue-400 shrink-0" />
-              <span>Acesso público e gratuito na fase inicial.</span>
+            <div className="space-y-2 text-slate-400 text-xs leading-relaxed">
+              <p>A Gato Net não hospeda, transmite ou armazena qualquer conteúdo.</p>
+              <p>Todos os links e players são públicos, encontrados livremente na internet.</p>
+              <p>Reproduzimos apenas fragmentos temporários (.m3u8/.ts), sem armazenar nada.</p>
+              <p>Se está online, já estava. Se cair, não fomos nós.</p>
+              <p className="pt-1">A Gato Net apenas organiza. A origem, o conteúdo e a responsabilidade são de terceiros.</p>
+              <p className="pt-1 text-[11px] text-blue-400 font-medium">
+                Para contatos legais: <a href="mailto:projetomeouve@gmail.com" className="hover:underline">projetomeouve@gmail.com</a>
+              </p>
             </div>
           </div>
         </div>
 
         {/* Bottom copyright & disclaimers */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
-          <p>© {new Date().getFullYear()} Gato Net TV. Todos os direitos reservados. Etapa 1 — Estrutura e Interface.</p>
+          <p>
+            © <button onClick={onOpenAdmin} className="hover:text-blue-400 transition-colors cursor-pointer select-none font-inherit" title="Admin">2026</button> Gato Net TV. Todos os direitos reservados.
+          </p>
           <div className="flex items-center gap-4 text-[11px]">
             <span>Privacidade & Termos</span>
-            <span>·</span>
-            <span>Sem dependência de serviços externos obrigatórios</span>
           </div>
         </div>
       </div>

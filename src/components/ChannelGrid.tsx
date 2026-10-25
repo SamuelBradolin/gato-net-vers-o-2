@@ -102,7 +102,7 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
           <p className="text-xs text-slate-400 mt-1">
             {activeCategoryId === 'cat_football'
               ? 'Agenda esportiva com partidas ao vivo e transmissões vinculadas aos canais da Gato Net.'
-              : 'Navegue pelas categorias para assistir aos canais demonstrativos na plataforma.'}
+              : 'Navegue pelas categorias para assistir aos canais na plataforma.'}
           </p>
         </div>
 
@@ -229,9 +229,6 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
                     <span className="font-mono text-xs font-bold text-slate-400">
                       #{channel.number < 10 ? `0${channel.number}` : channel.number}
                     </span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-900/50">
-                      DEMO
-                    </span>
                   </div>
 
                   <div className="flex items-center gap-1">
@@ -252,31 +249,69 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
                   </div>
                 </div>
 
-                {/* Center: Channel Logo and Artwork */}
+                {/* Center: Channel Artwork (Capa do Canal) & Logo */}
                 <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-[#03060c] border border-slate-800 flex items-center justify-center mb-3">
-                  <img
-                    src={channel.backupImage}
-                    alt={channel.name}
-                    className="w-full h-full object-cover opacity-30 group-hover:opacity-40 transition-opacity"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center p-3">
-                    <div className="w-12 h-12 rounded-xl bg-[#091024]/90 border border-blue-500/30 flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform overflow-hidden">
+                  {channel.coverImage ? (
+                    /* Caso 1: Com Capa Cadastrada - Capa como imagem de fundo com object-fit: cover */
+                    <>
                       <img
-                        src={channel.logo}
+                        src={channel.coverImage}
                         alt={channel.name}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                         referrerPolicy="no-referrer"
-                        onError={(e) => {
-                          (e.currentTarget as HTMLElement).style.display = 'none';
-                        }}
                       />
-                      <Tv className="w-5 h-5 text-blue-400 fallback-icon" />
-                    </div>
-                  </div>
+                      {/* Gradiente escuro para garantir contraste e visibilidade da logo */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/30" />
+
+                      {/* Logotipo centralizado sobre a capa com contain e padding */}
+                      {channel.logo && (
+                        <div className="absolute inset-0 flex items-center justify-center p-3 pointer-events-none">
+                          <div className="w-16 h-12 sm:w-20 sm:h-14 rounded-xl bg-black/65 backdrop-blur-md border border-white/20 flex items-center justify-center p-2 shadow-2xl group-hover:scale-105 transition-transform overflow-hidden">
+                            <img
+                              src={channel.logo}
+                              alt={channel.name}
+                              className="w-full h-full object-contain"
+                              referrerPolicy="no-referrer"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLElement).style.display = 'none';
+                              }}
+                            />
+                            <Tv className="w-5 h-5 text-blue-400 fallback-icon" />
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    /* Caso 2: Sem Capa Cadastrada - Fundo padrão atual da Gato Net */
+                    <>
+                      <img
+                        src={channel.backupImage}
+                        alt=""
+                        className="w-full h-full object-cover opacity-30 group-hover:opacity-40 transition-opacity"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-b from-[#0a0f1d]/60 to-[#03060c]/90" />
+
+                      {/* Logotipo completo, centralizado, sem cortes, com espaçamento interno e proporção preservada */}
+                      <div className="absolute inset-0 flex items-center justify-center p-3 pointer-events-none">
+                        <div className="w-20 h-14 sm:w-24 sm:h-16 rounded-xl bg-[#091024]/90 border border-blue-500/30 flex items-center justify-center p-2.5 shadow-lg group-hover:scale-105 transition-transform overflow-hidden">
+                          <img
+                            src={channel.logo}
+                            alt={channel.name}
+                            className="w-full h-full object-contain"
+                            referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLElement).style.display = 'none';
+                            }}
+                          />
+                          <Tv className="w-5 h-5 text-blue-400 fallback-icon" />
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   {/* Play Hover Overlay */}
-                  <div className="absolute inset-0 bg-blue-600/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                  <div className="absolute inset-0 bg-blue-600/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
                     <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform">
                       <Play className="w-4 h-4 ml-0.5 fill-white" />
                     </div>
@@ -284,7 +319,7 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
 
                   {/* Selected Indicator Badge */}
                   {isSelected && (
-                    <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600 text-white text-[10px] font-bold font-mono tracking-wider shadow">
+                    <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600 text-white text-[10px] font-bold font-mono tracking-wider shadow z-10">
                       <span>SELECIONADO</span>
                     </div>
                   )}
@@ -297,8 +332,6 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
                   </h4>
                   <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1">
                     <span className="truncate">{channel.categoryName}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="text-[11px] font-mono text-blue-400 shrink-0">DEMO</span>
                   </div>
                   <p className="text-[11px] text-slate-400 truncate mt-1">
                     {channel.currentProgram}

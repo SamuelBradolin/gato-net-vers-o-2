@@ -250,6 +250,7 @@ export default function App() {
               categoryId: c.category_id,
               categoryName: c.category_name,
               logo: c.logo_url,
+              coverImage: c.cover_image_url || null,
               backupImage: c.backup_image_url,
               streamUrl: c.stream_url,
               alternativeStreams: c.alternative_streams || [],

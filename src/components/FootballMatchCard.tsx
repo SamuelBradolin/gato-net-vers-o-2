@@ -85,7 +85,7 @@ export const FootballMatchCard: React.FC<FootballMatchCardProps> = ({
             {isLive ? (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-600/20 border border-red-500/50 text-red-400 text-[10px] font-extrabold uppercase tracking-wider animate-pulse">
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
-                AO VIVO {match.minute && `• ${match.minute}`}
+                AO VIVO
               </span>
             ) : isFinished ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-400 text-[10px] font-semibold">
@@ -127,27 +127,15 @@ export const FootballMatchCard: React.FC<FootballMatchCardProps> = ({
             </h4>
           </div>
 
-          {/* Match Score or VS Indicator */}
+          {/* Match VS Indicator (Placar oculto conforme solicitado) */}
           <div className="shrink-0 flex flex-col items-center px-2">
-            {isLive || isFinished ? (
-              <div className="flex items-center gap-2 bg-[#060a14] border border-blue-900/60 px-3 py-1.5 rounded-xl shadow-inner">
-                <span className={`text-lg sm:text-xl font-extrabold font-mono ${isLive ? 'text-red-400' : 'text-white'}`}>
-                  {match.scoreHome ?? 0}
-                </span>
-                <span className="text-xs text-slate-500 font-bold">x</span>
-                <span className={`text-lg sm:text-xl font-extrabold font-mono ${isLive ? 'text-red-400' : 'text-white'}`}>
-                  {match.scoreAway ?? 0}
-                </span>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center">
-                <span className="text-xs font-black tracking-widest text-slate-500 bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-800">
-                  VS
-                </span>
-                <span className="text-[11px] font-mono text-blue-400 mt-1 font-semibold">
-                  {match.matchTime}
-                </span>
-              </div>
+            <span className="text-xs font-black tracking-widest text-slate-500 bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-800">
+              VS
+            </span>
+            {match.matchTime && (
+              <span className="text-[11px] font-mono text-blue-400 mt-1 font-semibold">
+                {match.matchTime}
+              </span>
             )}
           </div>
 

@@ -98,8 +98,8 @@ export function getInitialDemoMatches(): FootballMatch[] {
       timezone: 'America/Sao_Paulo',
       description: 'Clássico interestadual direto pela liderança da tabela com narração exclusiva.',
       channels: [
-        { channelId: 'ch_gato_esportes_1', channelName: 'Gato Esporte 1 (Demo)', channelNumber: 10, isPrimary: true },
-        { channelId: 'ch_globo', channelName: 'Rede Globo (Demo)', channelNumber: 1, isPrimary: false }
+        { channelId: 'ch_gato_esportes_1', channelName: 'Gato Esporte 1', channelNumber: 10, isPrimary: true },
+        { channelId: 'ch_globo', channelName: 'Rede Globo', channelNumber: 1, isPrimary: false }
       ],
       primaryChannelId: 'ch_gato_esportes_1',
       status: 'live',
@@ -128,7 +128,7 @@ export function getInitialDemoMatches(): FootballMatch[] {
       timezone: 'America/Sao_Paulo',
       description: 'O maior clássico do futebol europeu ao vivo no Santiago Bernabéu.',
       channels: [
-        { channelId: 'ch_arena_play', channelName: 'Arena Play Esportes (Demo)', channelNumber: 11, isPrimary: true }
+        { channelId: 'ch_arena_play', channelName: 'Arena Play Esportes', channelNumber: 11, isPrimary: true }
       ],
       primaryChannelId: 'ch_arena_play',
       status: 'live',
@@ -157,8 +157,8 @@ export function getInitialDemoMatches(): FootballMatch[] {
       timezone: 'America/Sao_Paulo',
       description: 'Majestoso decisivo direto da Neo Química Arena.',
       channels: [
-        { channelId: 'ch_turbo_esportes', channelName: 'Turbo Esportes (Demo)', channelNumber: 12, isPrimary: true },
-        { channelId: 'ch_band', channelName: 'Band TV (Demo)', channelNumber: 4, isPrimary: false }
+        { channelId: 'ch_turbo_esportes', channelName: 'Turbo Esportes', channelNumber: 12, isPrimary: true },
+        { channelId: 'ch_band', channelName: 'Band TV', channelNumber: 4, isPrimary: false }
       ],
       primaryChannelId: 'ch_turbo_esportes',
       status: 'scheduled',
@@ -187,7 +187,7 @@ export function getInitialDemoMatches(): FootballMatch[] {
       timezone: 'America/Sao_Paulo',
       description: 'Duelo inglês no Etihad Stadium em alta definição.',
       channels: [
-        { channelId: 'ch_arena_play', channelName: 'Arena Play Esportes (Demo)', channelNumber: 11, isPrimary: true }
+        { channelId: 'ch_arena_play', channelName: 'Arena Play Esportes', channelNumber: 11, isPrimary: true }
       ],
       primaryChannelId: 'ch_arena_play',
       status: 'scheduled',
@@ -216,7 +216,7 @@ export function getInitialDemoMatches(): FootballMatch[] {
       timezone: 'America/Sao_Paulo',
       description: 'Partida disputada no Estádio Nilton Santos.',
       channels: [
-        { channelId: 'ch_gato_esportes_1', channelName: 'Gato Esporte 1 (Demo)', channelNumber: 10, isPrimary: true }
+        { channelId: 'ch_gato_esportes_1', channelName: 'Gato Esporte 1', channelNumber: 10, isPrimary: true }
       ],
       primaryChannelId: 'ch_gato_esportes_1',
       status: 'scheduled',
@@ -245,7 +245,7 @@ export function getInitialDemoMatches(): FootballMatch[] {
       timezone: 'America/Sao_Paulo',
       description: 'Grande noite européia com transmissão completa.',
       channels: [
-        { channelId: 'ch_turbo_esportes', channelName: 'Turbo Esportes (Demo)', channelNumber: 12, isPrimary: true }
+        { channelId: 'ch_turbo_esportes', channelName: 'Turbo Esportes', channelNumber: 12, isPrimary: true }
       ],
       primaryChannelId: 'ch_turbo_esportes',
       status: 'scheduled',

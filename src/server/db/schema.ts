@@ -58,6 +58,7 @@ export interface DbChannel {
   category_id: string;
   category_name?: string;
   logo_url: string;
+  cover_image_url?: string | null;
   backup_image_url?: string;
   stream_url: string;
   alternative_streams: (string | BackupStreamItem)[];

@@ -111,11 +111,6 @@ export const FeaturedBanner: React.FC<FeaturedBannerProps> = ({
               <h2 className="text-xs sm:text-sm font-bold text-white truncate max-w-full">
                 {current.title}
               </h2>
-              {current.isDemo && (
-                <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
-                  Demo
-                </span>
-              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-300 mt-0.5">
